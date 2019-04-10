@@ -565,6 +565,8 @@ def panel_to_frame(x, items, major_axis, minor_axis, swap=False):
     if `swap` is True, it is equivalent to
 
     Panel(x, items, major_axis, minor_axis).swapaxes(1,2).to_frame()
+
+    where Panel is the now-removed pandas Panel object.
     """
     nmajor = np.arange(len(major_axis))
     nminor = np.arange(len(minor_axis))
