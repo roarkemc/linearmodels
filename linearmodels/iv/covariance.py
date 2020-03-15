@@ -4,16 +4,31 @@ Covariance estimation for 2SLS and LIML IV estimators
 from typing import Any, Callable, Dict, Union
 
 from mypy_extensions import VarArg
-from numpy import (arange, argsort, asarray, ceil, cos, empty, int64, ndarray,
-                   ones, pi, r_, sin, sum as npsum, unique, where, zeros)
+from numpy import (
+    arange,
+    asarray,
+    ceil,
+    cos,
+    empty,
+    int64,
+    ndarray,
+    ones,
+    pi,
+    sin,
+    sum as npsum,
+    unique,
+    zeros,
+)
 from numpy.linalg import inv, pinv
 
-from linearmodels.typing import Numeric, OptionalNumeric
+from linearmodels.shared.covariance import cov_cluster, cov_kernel
+from linearmodels.typing import NDArray, Numeric, OptionalNumeric
 
-KernelWeight = Union[Callable[[int, float], ndarray],
-                     Callable[[float, float], ndarray],
-                     Callable[[int, VarArg(Any)], ndarray],
-                     Callable[[Numeric, int], Any]]
+KernelWeight = Union[
+    Callable[[float, float], ndarray],
+    Callable[[float, int], ndarray],
+    Callable[[float, VarArg(Any)], ndarray],
+]
 
 CLUSTER_ERR = """
 clusters has the wrong nobs. Expected {0}, got {1}.  Any missing observation
@@ -23,72 +38,7 @@ property `notnull` contains the locations of the observations that have no
 missing values."""
 
 
-def _cov_cluster(z: ndarray, clusters: ndarray) -> ndarray:
-    """
-    Core cluster covariance estimator
-
-    Parameters
-    ----------
-    z : ndarray
-        n by k mean zero data array
-    clusters : ndarray
-        n by 1 array
-
-    Returns
-    -------
-    c : ndarray
-       k by k cluster asymptotic covariance
-    """
-
-    num_clusters = len(unique(clusters))
-
-    sort_args = argsort(clusters)
-    clusters = clusters[sort_args]
-    locs = where(r_[True, clusters[:-1] != clusters[1:], True])[0]
-    z = z[sort_args]
-    n, k = z.shape
-    s = zeros((k, k))
-
-    for i in range(num_clusters):
-        st, en = locs[i], locs[i + 1]
-        z_bar = z[st:en].sum(axis=0)[:, None]
-        s += z_bar @ z_bar.T
-
-    s /= n
-    return s
-
-
-def _cov_kernel(z: ndarray, w: ndarray) -> ndarray:
-    """
-    Core kernel covariance estimator
-
-    Parameters
-    ----------
-    z : ndarray
-        n by k mean zero data array
-    w : ndarray
-        m by 1
-
-    Returns
-    -------
-    c : ndarray
-       k by k kernel asymptotic covariance
-    """
-    k = len(w)
-    n = z.shape[0]
-    if k > n:
-        raise ValueError('Length of w ({0}) is larger than the number '
-                         'of elements in z ({1})'.format(k, n))
-    s = z.T @ z
-    for i in range(1, len(w)):
-        op = z[i:].T @ z[:-i]
-        s += w[i] * (op + op.T)
-
-    s /= n
-    return s
-
-
-def kernel_weight_bartlett(bw: int, *args) -> ndarray:
+def kernel_weight_bartlett(bw: float, *args: int) -> NDArray:
     r"""
     Kernel weights from a Bartlett kernel
 
@@ -99,7 +49,7 @@ def kernel_weight_bartlett(bw: int, *args) -> ndarray:
 
     Returns
     -------
-    weights : ndarray
+    ndarray
         Weight array  ordered by lag position (maxlag + 1)
 
     Notes
@@ -108,10 +58,10 @@ def kernel_weight_bartlett(bw: int, *args) -> ndarray:
 
        w_i = 1 - i / (m + 1), \, i < m
     """
-    return 1 - arange(bw + 1) / (bw + 1)
+    return 1 - arange(int(bw) + 1) / (int(bw) + 1)
 
 
-def kernel_weight_quadratic_spectral(bw: Numeric, n: int) -> ndarray:
+def kernel_weight_quadratic_spectral(bw: float, n: int) -> NDArray:
     r"""
     Kernel weights from a quadratic-spectral kernel
 
@@ -124,7 +74,7 @@ def kernel_weight_quadratic_spectral(bw: Numeric, n: int) -> ndarray:
 
     Returns
     -------
-    weights : ndarray
+    ndarray
         Weight array  ordered by lag position (maxlag + 1)
 
     Notes
@@ -146,7 +96,7 @@ def kernel_weight_quadratic_spectral(bw: Numeric, n: int) -> ndarray:
         w[0] = 0
         return w
 
-    z = arange(n + 1) / bw
+    z = arange(n + 1) / float(bw)
     w = 6 * pi * z / 5
     w[0] = 1
     w[1:] = 3 / w[1:] ** 2 * (sin(w[1:]) / w[1:] - cos(w[1:]))
@@ -154,7 +104,7 @@ def kernel_weight_quadratic_spectral(bw: Numeric, n: int) -> ndarray:
     return w
 
 
-def kernel_weight_parzen(bw: int, *args) -> ndarray:
+def kernel_weight_parzen(bw: float, *args: int) -> NDArray:
     r"""
     Kernel weights from a Parzen kernel
 
@@ -165,7 +115,7 @@ def kernel_weight_parzen(bw: int, *args) -> ndarray:
 
     Returns
     -------
-    weights : ndarray
+    ndarray
         Weight array  ordered by lag position (maxlag + 1)
 
     Notes
@@ -176,13 +126,13 @@ def kernel_weight_parzen(bw: int, *args) -> ndarray:
        w_i &  = 1-6z_i^2+6z_i^3, z \leq 0.5 \\
        w_i &  = 2(1-z_i)^3, z > 0.5
     """
-    z = arange(bw + 1) / (bw + 1)
+    z = arange(int(bw) + 1) / (int(bw) + 1)
     w = 1 - 6 * z ** 2 + 6 * z ** 3
     w[z > 0.5] = 2 * (1 - z[z > 0.5]) ** 3
     return w
 
 
-def kernel_optimal_bandwidth(x: ndarray, kernel: str = 'bartlett') -> int:
+def kernel_optimal_bandwidth(x: NDArray, kernel: str = "bartlett") -> int:
     """
     Parameters
     x : ndarray
@@ -196,7 +146,7 @@ def kernel_optimal_bandwidth(x: ndarray, kernel: str = 'bartlett') -> int:
 
     Returns
     -------
-    m : int
+    int
         Optimal bandwidth. Set to nobs - 1 if computed bandwidth is larger.
 
     Notes
@@ -215,17 +165,17 @@ def kernel_optimal_bandwidth(x: ndarray, kernel: str = 'bartlett') -> int:
     """
     t = x.shape[0]
     x = x.squeeze()
-    if kernel in ('bartlett', 'newey-west'):
+    if kernel in ("bartlett", "newey-west"):
         q, c = 1, 1.1447
         m_star = int(ceil(4 * (t / 100) ** (2 / 9)))
-    elif kernel in ('qs', 'andrews', 'quadratic-spectral'):
+    elif kernel in ("qs", "andrews", "quadratic-spectral"):
         q, c = 2, 1.3221
-        m_star = int(ceil(4 * (t / 100) ** (4 / 25)))
-    elif kernel in ('gallant', 'parzen'):
-        q, c = 2, 2.6614
         m_star = int(ceil(4 * (t / 100) ** (2 / 25)))
+    elif kernel in ("gallant", "parzen"):
+        q, c = 2, 2.6614
+        m_star = int(ceil(4 * (t / 100) ** (4 / 25)))
     else:
-        raise ValueError('Unknown kernel: {0}'.format(kernel))
+        raise ValueError("Unknown kernel: {0}".format(kernel))
     sigma = empty(m_star + 1)
     sigma[0] = x.T @ x / t
     for i in range(1, m_star + 1):
@@ -238,13 +188,15 @@ def kernel_optimal_bandwidth(x: ndarray, kernel: str = 'bartlett') -> int:
     return min(int(ceil(m)), t - 1)
 
 
-KERNEL_LOOKUP = {'bartlett': kernel_weight_bartlett,
-                 'newey-west': kernel_weight_bartlett,
-                 'quadratic-spectral': kernel_weight_quadratic_spectral,
-                 'qs': kernel_weight_quadratic_spectral,
-                 'andrews': kernel_weight_quadratic_spectral,
-                 'gallant': kernel_weight_parzen,
-                 'parzen': kernel_weight_parzen}  # type: Dict[str, KernelWeight]
+KERNEL_LOOKUP: Dict[str, KernelWeight] = {
+    "bartlett": kernel_weight_bartlett,
+    "newey-west": kernel_weight_bartlett,
+    "quadratic-spectral": kernel_weight_quadratic_spectral,
+    "qs": kernel_weight_quadratic_spectral,
+    "andrews": kernel_weight_quadratic_spectral,
+    "gallant": kernel_weight_parzen,
+    "parzen": kernel_weight_parzen,
+}
 
 
 class HomoskedasticCovariance(object):
@@ -290,12 +242,19 @@ class HomoskedasticCovariance(object):
     :math:`Z` is the matrix of instruments, including exogenous regressors.
     """
 
-    def __init__(self, x: ndarray, y: ndarray, z: ndarray, params: ndarray, debiased: bool = False,
-                 kappa: Numeric = 1):
+    def __init__(
+        self,
+        x: NDArray,
+        y: NDArray,
+        z: NDArray,
+        params: NDArray,
+        debiased: bool = False,
+        kappa: Numeric = 1,
+    ):
         if not (x.shape[0] == y.shape[0] == z.shape[0]):
-            raise ValueError('x, y and z must have the same number of rows')
+            raise ValueError("x, y and z must have the same number of rows")
         if not x.shape[1] == len(params):
-            raise ValueError('x and params must have compatible dimensions')
+            raise ValueError("x and params must have compatible dimensions")
 
         self.x = x
         self.y = y
@@ -307,22 +266,25 @@ class HomoskedasticCovariance(object):
         self._pinvz = pinv(z)
         nobs, nvar = x.shape
         self._scale = nobs / (nobs - nvar) if self._debiased else 1
-        self._name = 'Unadjusted Covariance (Homoskedastic)'
+        self._name = "Unadjusted Covariance (Homoskedastic)"
 
     def __str__(self) -> str:
         out = self._name
-        out += '\nDebiased: {0}'.format(self._debiased)
+        out += "\nDebiased: {0}".format(self._debiased)
         if self._kappa != 1:
-            out += '\nKappa: {0:0.3f}'.format(self._kappa)
+            out += "\nKappa: {0:0.3f}".format(self._kappa)
         return out
 
     def __repr__(self) -> str:
-        return self.__str__() + '\n' + \
-               self.__class__.__name__ + \
-               ', id: {0}'.format(hex(id(self)))
+        return (
+            self.__str__()
+            + "\n"
+            + self.__class__.__name__
+            + ", id: {0}".format(hex(id(self)))
+        )
 
     @property
-    def s(self) -> ndarray:
+    def s(self) -> NDArray:
         """Score covariance estimate"""
         x, z, eps = self.x, self.z, self.eps
         nobs = x.shape[0]
@@ -337,7 +299,7 @@ class HomoskedasticCovariance(object):
         return self._scale * s2 * v
 
     @property
-    def cov(self) -> ndarray:
+    def cov(self) -> NDArray:
         """Covariance of estimated parameters"""
 
         x, z = self.x, self.z
@@ -355,7 +317,7 @@ class HomoskedasticCovariance(object):
         return (c + c.T) / 2
 
     @property
-    def s2(self) -> ndarray:
+    def s2(self) -> NDArray:
         """
         Estimated variance of residuals. Small-sample adjusted if debiased.
         """
@@ -371,8 +333,7 @@ class HomoskedasticCovariance(object):
 
     @property
     def config(self) -> Dict[str, Any]:
-        return {'debiased': self.debiased,
-                'kappa': self._kappa}
+        return {"debiased": self.debiased, "kappa": self._kappa}
 
 
 class HeteroskedasticCovariance(HomoskedasticCovariance):
@@ -420,13 +381,22 @@ class HeteroskedasticCovariance(HomoskedasticCovariance):
     :math:`Z` is the matrix of instruments, including exogenous regressors.
     """
 
-    def __init__(self, x: ndarray, y: ndarray, z: ndarray, params: ndarray, debiased: bool = False,
-                 kappa: Numeric = 1):
-        super(HeteroskedasticCovariance, self).__init__(x, y, z, params, debiased, kappa)
-        self._name = 'Robust Covariance (Heteroskedastic)'
+    def __init__(
+        self,
+        x: NDArray,
+        y: NDArray,
+        z: NDArray,
+        params: NDArray,
+        debiased: bool = False,
+        kappa: Numeric = 1,
+    ):
+        super(HeteroskedasticCovariance, self).__init__(
+            x, y, z, params, debiased, kappa
+        )
+        self._name = "Robust Covariance (Heteroskedastic)"
 
     @property
-    def s(self) -> ndarray:
+    def s(self) -> NDArray:
         """Heteroskedasticity-robust score covariance estimate"""
         x, z, eps = self.x, self.z, self.eps
         nobs, nvar = x.shape
@@ -504,29 +474,37 @@ class KernelCovariance(HomoskedasticCovariance):
     linearmodels.iv.covariance.kernel_weight_quadratic_spectral
     """
 
-    def __init__(self, x: ndarray, y: ndarray, z: ndarray, params: ndarray,
-                 kernel: str = 'bartlett',
-                 bandwidth: OptionalNumeric = None, debiased: bool = False, kappa: Numeric = 1):
+    def __init__(
+        self,
+        x: NDArray,
+        y: NDArray,
+        z: NDArray,
+        params: NDArray,
+        kernel: str = "bartlett",
+        bandwidth: OptionalNumeric = None,
+        debiased: bool = False,
+        kappa: Numeric = 1,
+    ):
         super(KernelCovariance, self).__init__(x, y, z, params, debiased, kappa)
         self._kernels = KERNEL_LOOKUP
         self._kernel = kernel
         self._bandwidth = bandwidth
         self._auto_bandwidth = False
-        self._name = 'Kernel Covariance (HAC)'
+        self._name = "Kernel Covariance (HAC)"
 
         if kernel not in KERNEL_LOOKUP:
-            raise ValueError('Unknown kernel: {0}'.format(kernel))
+            raise ValueError("Unknown kernel: {0}".format(kernel))
 
     def __str__(self) -> str:
         out = super(KernelCovariance, self).__str__()
-        out += '\nKernel: {0}'.format(self._kernel)
-        out += '\nAutomatic Bandwidth: {0}'.format(self._auto_bandwidth)
+        out += "\nKernel: {0}".format(self._kernel)
+        out += "\nAutomatic Bandwidth: {0}".format(self._auto_bandwidth)
         if self._bandwidth:
-            out += '\nBandwidth: {0}'.format(self._bandwidth)
+            out += "\nBandwidth: {0}".format(self._bandwidth)
         return out
 
     @property
-    def s(self) -> ndarray:
+    def s(self) -> NDArray:
         """HAC score covariance estimate"""
         x, z, eps = self.x, self.z, self.eps
         nobs, nvar = x.shape
@@ -535,11 +513,12 @@ class KernelCovariance(HomoskedasticCovariance):
         xhat = z @ (pinvz @ x)
         xhat_e = xhat * eps
 
-        kernel = self.config['kernel']
-        bw = self.config['bandwidth']
+        kernel = self.config["kernel"]
+        bw = self.config["bandwidth"]
         if bw is None:
             self._auto_bandwidth = True
-            from linearmodels.utility import has_constant
+            from linearmodels.shared.linalg import has_constant
+
             const, loc = has_constant(xhat)
             sel = ones((xhat.shape[1], 1))
             if const:
@@ -550,16 +529,18 @@ class KernelCovariance(HomoskedasticCovariance):
         self._bandwidth = bw
         w = self._kernels[kernel](bw, nobs - 1)
 
-        s = _cov_kernel(xhat_e, w)
+        s = cov_kernel(xhat_e, w)
 
         return self._scale * s
 
     @property
     def config(self) -> Dict[str, Any]:
-        return {'debiased': self.debiased,
-                'bandwidth': self._bandwidth,
-                'kernel': self._kernel,
-                'kappa': self._kappa}
+        return {
+            "debiased": self.debiased,
+            "bandwidth": self._bandwidth,
+            "kernel": self._kernel,
+            "kappa": self._kappa,
+        }
 
 
 class ClusteredCovariance(HomoskedasticCovariance):
@@ -614,8 +595,16 @@ class ClusteredCovariance(HomoskedasticCovariance):
     :math:`Z` is the matrix of instruments, including exogenous regressors.
     """
 
-    def __init__(self, x: ndarray, y: ndarray, z: ndarray, params: ndarray,
-                 clusters: ndarray = None, debiased: bool = False, kappa: Numeric = 1):
+    def __init__(
+        self,
+        x: NDArray,
+        y: NDArray,
+        z: NDArray,
+        params: NDArray,
+        clusters: NDArray = None,
+        debiased: bool = False,
+        kappa: Numeric = 1,
+    ):
         super(ClusteredCovariance, self).__init__(x, y, z, params, debiased, kappa)
 
         nobs = x.shape[0]
@@ -626,22 +615,25 @@ class ClusteredCovariance(HomoskedasticCovariance):
             self._num_clusters = [len(unique(clusters))]
             self._num_clusters_str = str(self._num_clusters[0])
         else:
-            self._num_clusters = [len(unique(clusters[:, 0])), len(unique(clusters[:, 1]))]
-            self._num_clusters_str = ', '.join(map(str, self._num_clusters))
+            self._num_clusters = [
+                len(unique(clusters[:, 0])),
+                len(unique(clusters[:, 1])),
+            ]
+            self._num_clusters_str = ", ".join(map(str, self._num_clusters))
         if clusters is not None and clusters.shape[0] != nobs:
             raise ValueError(CLUSTER_ERR.format(nobs, clusters.shape[0]))
-        self._name = 'Clustered Covariance (One-Way)'
+        self._name = "Clustered Covariance (One-Way)"
 
     def __str__(self) -> str:
         out = super(ClusteredCovariance, self).__str__()
-        out += '\nNum Clusters: {0}'.format(self._num_clusters_str)
+        out += "\nNum Clusters: {0}".format(self._num_clusters_str)
         return out
 
     @property
-    def s(self) -> ndarray:
+    def s(self) -> NDArray:
         """Clustered estimator of score covariance"""
 
-        def rescale(s: ndarray, nc: int, nobs: int) -> ndarray:
+        def rescale(s: NDArray, nc: int, nobs: int) -> NDArray:
             scale = self._scale * (nc / (nc - 1)) * ((nobs - 1) / nobs)
             return s * scale if self.debiased else s
 
@@ -652,19 +644,19 @@ class ClusteredCovariance(HomoskedasticCovariance):
         nobs, nvar = x.shape
         clusters = self._clusters
         if self._clusters.ndim == 1:
-            s = _cov_cluster(xhat_e, clusters)
+            s = cov_cluster(xhat_e, clusters)
             s = rescale(s, self._num_clusters[0], nobs)
         else:
-            s0 = _cov_cluster(xhat_e, clusters[:, 0].squeeze())
+            s0 = cov_cluster(xhat_e, clusters[:, 0].squeeze())
             s0 = rescale(s0, self._num_clusters[0], nobs)
 
-            s1 = _cov_cluster(xhat_e, clusters[:, 1].squeeze())
+            s1 = cov_cluster(xhat_e, clusters[:, 1].squeeze())
             s1 = rescale(s1, self._num_clusters[1], nobs)
 
             c0 = clusters[:, 0] - clusters[:, 0].min() + 1
             c1 = clusters[:, 1] - clusters[:, 1].min() + 1
             c01 = (c0 * (c1.max() + 1) + c1).astype(int64)
-            s01 = _cov_cluster(xhat_e, c01.squeeze())
+            s01 = cov_cluster(xhat_e, c01.squeeze())
             nc = len(unique(c01))
             s01 = rescale(s01, nc, nobs)
 
@@ -674,6 +666,8 @@ class ClusteredCovariance(HomoskedasticCovariance):
 
     @property
     def config(self) -> Dict[str, Any]:
-        return {'debiased': self.debiased,
-                'clusters': self._clusters,
-                'kappa': self._kappa}
+        return {
+            "debiased": self.debiased,
+            "clusters": self._clusters,
+            "kappa": self._kappa,
+        }

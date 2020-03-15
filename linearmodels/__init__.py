@@ -32,54 +32,83 @@ instrumental variable estimators and system estimators:
 Designed to work equally well with NumPy, Pandas or xarray data.
 """
 import os
+from typing import List, Optional, Union
 
-from linearmodels.asset_pricing.model import (LinearFactorModel,
-                                              LinearFactorModelGMM,
-                                              TradedFactorModel)
-from linearmodels.iv.model import _OLS, IV2SLS, IVGMM, IVGMMCUE, IVLIML
-from linearmodels.panel.model import (BetweenOLS, FamaMacBeth,
-                                      FirstDifferenceOLS, PanelOLS, PooledOLS,
-                                      RandomEffects)
-from linearmodels.system import IV3SLS, SUR, IVSystemGMM
 from ._version import get_versions
+from .asset_pricing.model import (
+    LinearFactorModel,
+    LinearFactorModelGMM,
+    TradedFactorModel,
+)
+from .iv.model import _OLS, IV2SLS, IVGMM, IVGMMCUE, IVLIML
+from .panel.model import (
+    BetweenOLS,
+    FamaMacBeth,
+    FirstDifferenceOLS,
+    PanelOLS,
+    PooledOLS,
+    RandomEffects,
+)
+from .system import IV3SLS, SUR, IVSystemGMM
 
 OLS = _OLS
-WARN_ON_MISSING = os.environ.get('LINEARMODELS_WARN_ON_MISSING', True)
-WARN_ON_MISSING = False if WARN_ON_MISSING in ('0', 'False') else True
-DROP_MISSING = os.environ.get('LINEARMODELS_DROP_MISSING', True)
-DROP_MISSING = False if DROP_MISSING in ('0', 'False') else True
+WARN_ON_MISSING = os.environ.get("LINEARMODELS_WARN_ON_MISSING", True)
+WARN_ON_MISSING = False if WARN_ON_MISSING in ("0", "False") else True
+DROP_MISSING = os.environ.get("LINEARMODELS_DROP_MISSING", True)
+DROP_MISSING = False if DROP_MISSING in ("0", "False") else True
 
-__all__ = ['PooledOLS', 'PanelOLS', 'FirstDifferenceOLS', 'BetweenOLS',
-           'RandomEffects',
-           'FamaMacBeth',
-           'IVLIML', 'IVGMM', 'IVGMMCUE', 'IV2SLS', 'OLS',
-           'SUR', 'IV3SLS', 'IVSystemGMM',
-           'LinearFactorModel', 'LinearFactorModelGMM', 'TradedFactorModel',
-           'WARN_ON_MISSING', 'DROP_MISSING']
+__all__ = [
+    "PooledOLS",
+    "PanelOLS",
+    "FirstDifferenceOLS",
+    "BetweenOLS",
+    "RandomEffects",
+    "FamaMacBeth",
+    "IVLIML",
+    "IVGMM",
+    "IVGMMCUE",
+    "IV2SLS",
+    "OLS",
+    "SUR",
+    "IV3SLS",
+    "IVSystemGMM",
+    "LinearFactorModel",
+    "LinearFactorModelGMM",
+    "TradedFactorModel",
+    "WARN_ON_MISSING",
+    "DROP_MISSING",
+]
 
 
-def test(extra_args=None, exit=True, append=True):
+def test(
+    extra_args: Optional[Union[str, List[str]]] = None,
+    exit: bool = True,
+    append: bool = True,
+) -> None:
     import sys
+
     try:
         import pytest
     except ImportError:
         raise ImportError("Need pytest to run tests")
 
-    cmd = ['--tb=short', '--disable-pytest-warnings']
+    cmd = ["--tb=auto"]
     if extra_args:
         if not isinstance(extra_args, list):
-            extra_args = [extra_args]
-        if append:
-            cmd += extra_args[:]
+            pytest_args = [extra_args]
         else:
-            cmd = extra_args
+            pytest_args = extra_args
+        if append:
+            cmd += pytest_args[:]
+        else:
+            cmd = pytest_args
     pkg = os.path.dirname(__file__)
     cmd = [pkg] + cmd
-    print("running: pytest {}".format(' '.join(cmd)))
+    print("running: pytest {}".format(" ".join(cmd)))
     status = pytest.main(cmd)
     if exit:
         sys.exit(status)
 
 
-__version__ = get_versions()['version']
+__version__ = get_versions()["version"]
 del get_versions

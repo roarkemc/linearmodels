@@ -1,18 +1,28 @@
 from linearmodels.compat.statsmodels import Summary
 
 import datetime as dt
+from typing import Dict, List, Optional, Union
 
-from cached_property import cached_property
 import numpy as np
 from pandas import DataFrame, Series, concat
+from property_cached import cached_property
 from scipy import stats
 from statsmodels.iolib.summary import SimpleTable, fmt_2cols, fmt_params
 
 from linearmodels.iv.results import default_txt_fmt, stub_concat, table_concat
-from linearmodels.utility import (_ModelComparison, _str, _SummaryStr,
-                                  pval_format, quadratic_form_test)
+from linearmodels.shared.base import _ModelComparison, _SummaryStr
+from linearmodels.shared.hypotheses import WaldTestStatistic, quadratic_form_test
+from linearmodels.shared.io import _str, pval_format
+from linearmodels.shared.utility import AttrDict
+from linearmodels.typing import NDArray, OptionalArrayLike
 
-__all__ = ['PanelResults', 'PanelEffectsResults', 'RandomEffectsResults']
+__all__ = [
+    "PanelResults",
+    "PanelEffectsResults",
+    "RandomEffectsResults",
+    "FamaMacBethResults",
+    "compare",
+]
 
 
 class PanelResults(_SummaryStr):
@@ -20,7 +30,7 @@ class PanelResults(_SummaryStr):
     Results container for panel data models that do not include effects
     """
 
-    def __init__(self, res):
+    def __init__(self, res: AttrDict):
         self._params = res.params.squeeze()
         self._deferred_cov = res.deferred_cov
         self._debiased = res.debiased
@@ -54,29 +64,29 @@ class PanelResults(_SummaryStr):
         self._not_null = res.not_null
 
     @property
-    def params(self):
+    def params(self) -> Series:
         """Estimated parameters"""
-        return Series(self._params, index=self._var_names, name='parameter')
+        return Series(self._params, index=self._var_names, name="parameter")
 
     @cached_property
-    def cov(self):
+    def cov(self) -> DataFrame:
         """Estimated covariance of parameters"""
-        return DataFrame(self._deferred_cov(),
-                         columns=self._var_names,
-                         index=self._var_names)
+        return DataFrame(
+            self._deferred_cov(), columns=self._var_names, index=self._var_names
+        )
 
     @property
-    def std_errors(self):
+    def std_errors(self) -> Series:
         """Estimated parameter standard errors"""
-        return Series(np.sqrt(np.diag(self.cov)), self._var_names, name='std_error')
+        return Series(np.sqrt(np.diag(self.cov)), self._var_names, name="std_error")
 
     @property
-    def tstats(self):
+    def tstats(self) -> Series:
         """Parameter t-statistics"""
-        return Series(self._params / self.std_errors, name='tstat')
+        return Series(self._params / self.std_errors, name="tstat")
 
     @cached_property
-    def pvalues(self):
+    def pvalues(self) -> Series:
         """
         Parameter p-vals. Uses t(df_resid) if ``debiased`` is True, else normal
         """
@@ -85,10 +95,10 @@ class PanelResults(_SummaryStr):
             pv = 2 * (1 - stats.t.cdf(abs_tstats, self.df_resid))
         else:
             pv = 2 * (1 - stats.norm.cdf(abs_tstats))
-        return Series(pv, index=self._var_names, name='pvalue')
+        return Series(pv, index=self._var_names, name="pvalue")
 
     @property
-    def df_resid(self):
+    def df_resid(self) -> int:
         """
         Residual degree of freedom
 
@@ -99,7 +109,7 @@ class PanelResults(_SummaryStr):
         return self._df_resid
 
     @property
-    def df_model(self):
+    def df_model(self) -> int:
         """
         Model degree of freedom
 
@@ -110,42 +120,43 @@ class PanelResults(_SummaryStr):
         return self._df_model
 
     @property
-    def nobs(self):
+    def nobs(self) -> int:
         """Number of observations used to estimate the model"""
         return self._nobs
 
     @property
-    def name(self):
+    def name(self) -> str:
         """Model name"""
         return self._name
 
     @property
-    def total_ss(self):
+    def total_ss(self) -> float:
         """Total sum of squares"""
         return self._total_ss
 
     @property
-    def model_ss(self):
+    def model_ss(self) -> float:
         """Residual sum of squares"""
         return self._total_ss - self._residual_ss
 
     @property
-    def resid_ss(self):
+    def resid_ss(self) -> float:
         """Residual sum of squares"""
         return self._residual_ss
 
     @property
-    def rsquared(self):
+    def rsquared(self) -> float:
         """Model Coefficient of determination"""
         return self._r2
 
     @property
-    def rsquared_between(self):
-        """Between Coefficient of determination
+    def rsquared_between(self) -> float:
+        """
+        Between Coefficient of determination
 
         Returns
         -------
-        rsquared : float
+        float
             Between coefficient of determination
 
         Notes
@@ -156,12 +167,13 @@ class PanelResults(_SummaryStr):
         return self._r2b
 
     @property
-    def rsquared_within(self):
-        """Within coefficient of determination
+    def rsquared_within(self) -> float:
+        """
+        Within coefficient of determination
 
         Returns
         -------
-        rsquared : float
+        float
             Within coefficient of determination
 
         Notes
@@ -172,12 +184,13 @@ class PanelResults(_SummaryStr):
         return self._r2w
 
     @property
-    def rsquared_overall(self):
-        """Overall coefficient of determination
+    def rsquared_overall(self) -> float:
+        """
+        Overall coefficient of determination
 
         Returns
         -------
-        rsquared : float
+        float
             Between coefficient of determination
 
         Notes
@@ -189,21 +202,21 @@ class PanelResults(_SummaryStr):
         return self._r2o
 
     @property
-    def s2(self):
+    def s2(self) -> float:
         """Residual variance estimator"""
         return self._s2
 
     @property
-    def entity_info(self):
+    def entity_info(self) -> Series:
         """Statistics on observations per entity"""
         return self._entity_info
 
     @property
-    def time_info(self):
+    def time_info(self) -> Series:
         """Statistics on observations per time interval"""
         return self._time_info
 
-    def conf_int(self, level=0.95):
+    def conf_int(self, level: float = 0.95) -> DataFrame:
         """
         Confidence interval construction
 
@@ -214,7 +227,7 @@ class PanelResults(_SummaryStr):
 
         Returns
         -------
-        ci : DataFrame
+        DataFrame
             Confidence interval of the form [lower, upper] for each parameters
 
         Notes
@@ -227,65 +240,77 @@ class PanelResults(_SummaryStr):
         else:
             q = stats.norm.ppf(ci_quantiles)
         q = q[None, :]
-        ci = self.params[:, None] + self.std_errors[:, None] * q
-        return DataFrame(ci, index=self._var_names, columns=['lower', 'upper'])
+        params = np.asarray(self.params)[:, None]
+        ci = params + np.asarray(self.std_errors)[:, None] * q
+        return DataFrame(ci, index=self._var_names, columns=["lower", "upper"])
 
     @property
-    def summary(self):
-        """:obj:`statsmodels.iolib.summary.Summary` : Summary table of model estimation results
+    def summary(self) -> Summary:
+        """
+        Model estimation summary.
+
+        Returns
+        -------
+        Summary
+            Summary table of model estimation results
 
         Supports export to csv, html and latex  using the methods ``summary.as_csv()``,
         ``summary.as_html()`` and ``summary.as_latex()``.
         """
 
-        title = self.name + ' Estimation Summary'
+        title = self.name + " Estimation Summary"
         mod = self.model
 
-        top_left = [('Dep. Variable:', mod.dependent.vars[0]),
-                    ('Estimator:', self.name),
-                    ('No. Observations:', self.nobs),
-                    ('Date:', self._datetime.strftime('%a, %b %d %Y')),
-                    ('Time:', self._datetime.strftime('%H:%M:%S')),
-                    ('Cov. Estimator:', self._cov_type),
-                    ('', ''),
-                    ('Entities:', str(int(self.entity_info['total']))),
-                    ('Avg Obs:', _str(self.entity_info['mean'])),
-                    ('Min Obs:', _str(self.entity_info['min'])),
-                    ('Max Obs:', _str(self.entity_info['max'])),
-                    ('', ''),
-                    ('Time periods:', str(int(self.time_info['total']))),
-                    ('Avg Obs:', _str(self.time_info['mean'])),
-                    ('Min Obs:', _str(self.time_info['min'])),
-                    ('Max Obs:', _str(self.time_info['max'])),
-                    ('', '')]
+        top_left = [
+            ("Dep. Variable:", mod.dependent.vars[0]),
+            ("Estimator:", self.name),
+            ("No. Observations:", self.nobs),
+            ("Date:", self._datetime.strftime("%a, %b %d %Y")),
+            ("Time:", self._datetime.strftime("%H:%M:%S")),
+            ("Cov. Estimator:", self._cov_type),
+            ("", ""),
+            ("Entities:", str(int(self.entity_info["total"]))),
+            ("Avg Obs:", _str(self.entity_info["mean"])),
+            ("Min Obs:", _str(self.entity_info["min"])),
+            ("Max Obs:", _str(self.entity_info["max"])),
+            ("", ""),
+            ("Time periods:", str(int(self.time_info["total"]))),
+            ("Avg Obs:", _str(self.time_info["mean"])),
+            ("Min Obs:", _str(self.time_info["min"])),
+            ("Max Obs:", _str(self.time_info["max"])),
+            ("", ""),
+        ]
 
         is_invalid = np.isfinite(self.f_statistic.stat)
-        f_stat = _str(self.f_statistic.stat) if is_invalid else '--'
-        f_pval = pval_format(self.f_statistic.pval) if is_invalid else '--'
-        f_dist = self.f_statistic.dist_name if is_invalid else '--'
+        f_stat = _str(self.f_statistic.stat) if is_invalid else "--"
+        f_pval = pval_format(self.f_statistic.pval) if is_invalid else "--"
+        f_dist = self.f_statistic.dist_name if is_invalid else "--"
 
-        f_robust = _str(self.f_statistic_robust.stat) if is_invalid else '--'
-        f_robust_pval = pval_format(self.f_statistic_robust.pval) if is_invalid else '--'
-        f_robust_name = self.f_statistic_robust.dist_name if is_invalid else '--'
+        f_robust = _str(self.f_statistic_robust.stat) if is_invalid else "--"
+        f_robust_pval = (
+            pval_format(self.f_statistic_robust.pval) if is_invalid else "--"
+        )
+        f_robust_name = self.f_statistic_robust.dist_name if is_invalid else "--"
 
-        top_right = [('R-squared:', _str(self.rsquared)),
-                     ('R-squared (Between):', _str(self.rsquared_between)),
-                     ('R-squared (Within):', _str(self.rsquared_within)),
-                     ('R-squared (Overall):', _str(self.rsquared_overall)),
-                     ('Log-likelihood', _str(self._loglik)),
-                     ('', ''),
-                     ('F-statistic:', f_stat),
-                     ('P-value', f_pval),
-                     ('Distribution:', f_dist),
-                     ('', ''),
-                     ('F-statistic (robust):', f_robust),
-                     ('P-value', f_robust_pval),
-                     ('Distribution:', f_robust_name),
-                     ('', ''),
-                     ('', ''),
-                     ('', ''),
-                     ('', ''),
-                     ]
+        top_right = [
+            ("R-squared:", _str(self.rsquared)),
+            ("R-squared (Between):", _str(self.rsquared_between)),
+            ("R-squared (Within):", _str(self.rsquared_within)),
+            ("R-squared (Overall):", _str(self.rsquared_overall)),
+            ("Log-likelihood", _str(self._loglik)),
+            ("", ""),
+            ("F-statistic:", f_stat),
+            ("P-value", f_pval),
+            ("Distribution:", f_dist),
+            ("", ""),
+            ("F-statistic (robust):", f_robust),
+            ("P-value", f_robust_pval),
+            ("Distribution:", f_robust_name),
+            ("", ""),
+            ("", ""),
+            ("", ""),
+            ("", ""),
+        ]
 
         stubs = []
         vals = []
@@ -299,9 +324,9 @@ class PanelResults(_SummaryStr):
         # Top Table
         # Parameter table
         fmt = fmt_2cols
-        fmt['data_fmts'][1] = '%18s'
+        fmt["data_fmts"][1] = "%18s"
 
-        top_right = [('%-21s' % ('  ' + k), v) for k, v in top_right]
+        top_right = [("%-21s" % ("  " + k), v) for k, v in top_right]
         stubs = []
         vals = []
         for stub, val in top_right:
@@ -310,11 +335,13 @@ class PanelResults(_SummaryStr):
         table.extend_right(SimpleTable(vals, stubs=stubs))
         smry.tables.append(table)
 
-        param_data = np.c_[self.params.values[:, None],
-                           self.std_errors.values[:, None],
-                           self.tstats.values[:, None],
-                           self.pvalues.values[:, None],
-                           self.conf_int()]
+        param_data = np.c_[
+            self.params.values[:, None],
+            self.std_errors.values[:, None],
+            self.tstats.values[:, None],
+            self.pvalues.values[:, None],
+            self.conf_int(),
+        ]
         data = []
         for row in param_data:
             txt_row = []
@@ -324,47 +351,58 @@ class PanelResults(_SummaryStr):
                     f = pval_format
                 txt_row.append(f(v))
             data.append(txt_row)
-        title = 'Parameter Estimates'
+        title = "Parameter Estimates"
         table_stubs = list(self.params.index)
-        header = ['Parameter', 'Std. Err.', 'T-stat', 'P-value', 'Lower CI', 'Upper CI']
-        table = SimpleTable(data,
-                            stubs=table_stubs,
-                            txt_fmt=fmt_params,
-                            headers=header,
-                            title=title)
+        header = ["Parameter", "Std. Err.", "T-stat", "P-value", "Lower CI", "Upper CI"]
+        table = SimpleTable(
+            data, stubs=table_stubs, txt_fmt=fmt_params, headers=header, title=title
+        )
         smry.tables.append(table)
 
         return smry
 
     @property
-    def resids(self):
-        """Model residuals
+    def resids(self) -> Series:
+        """
+        Model residuals
 
         Notes
         -----
         These residuals are from the estimated model. They will not have the
         same shape as the original data whenever the model is estimated on
         transformed data which has a different shape."""
-        return Series(self._resids.squeeze(), index=self._index, name='residual')
+        return Series(self._resids.squeeze(), index=self._index, name="residual")
 
-    def _out_of_sample(self, exog, data, fitted, missing):
+    def _out_of_sample(
+        self, exog: OptionalArrayLike, data: Optional[DataFrame], missing: bool
+    ) -> DataFrame:
         """Interface between model predict and predict for OOS fits"""
         if exog is not None and data is not None:
-            raise ValueError('Predictions can only be constructed using one '
-                             'of exog or data, but not both.')
+            raise ValueError(
+                "Predictions can only be constructed using one "
+                "of exog or data, but not both."
+            )
         pred = self.model.predict(self.params, exog=exog, data=data)
         if not missing:
             pred = pred.loc[pred.notnull().all(1)]
         return pred
 
-    def predict(self, exog=None, *, data=None, fitted=True, effects=False, idiosyncratic=False,
-                missing=False):
+    def predict(
+        self,
+        exog: OptionalArrayLike = None,
+        *,
+        data: Optional[DataFrame] = None,
+        fitted: bool = True,
+        effects: bool = False,
+        idiosyncratic: bool = False,
+        missing: bool = False,
+    ) -> DataFrame:
         """
         In- and out-of-sample predictions
 
         Parameters
         ----------
-        exog : array-like
+        exog : array_like
             Exogenous values to use in out-of-sample prediction (nobs by nexog)
         data : DataFrame, optional
             DataFrame to use for out-of-sample predictions when model was
@@ -382,7 +420,7 @@ class PanelResults(_SummaryStr):
 
         Returns
         -------
-        predictions : DataFrame
+        DataFrame
             DataFrame containing columns for all selected output
 
         Notes
@@ -398,7 +436,7 @@ class PanelResults(_SummaryStr):
         predictions.
         """
         if not (exog is None and data is None):
-            return self._out_of_sample(exog, data, fitted, missing)
+            return self._out_of_sample(exog, data, missing)
         out = []
         if fitted:
             out.append(self.fitted_values)
@@ -407,20 +445,20 @@ class PanelResults(_SummaryStr):
         if idiosyncratic:
             out.append(self.idiosyncratic)
         if len(out) == 0:
-            raise ValueError('At least one output must be selected')
-        out = concat(out, 1)  # type: DataFrame
+            raise ValueError("At least one output must be selected")
+        out_df: DataFrame = concat(out, 1)
         if missing:
             index = self._original_index
-            out = out.reindex(index)
-        return out
+            out_df = out_df.reindex(index)
+        return out_df
 
     @property
-    def fitted_values(self):
+    def fitted_values(self) -> Series:
         """Fitted values"""
         return self._fitted
 
     @property
-    def estimated_effects(self):
+    def estimated_effects(self) -> Series:
         """
         Estimated effects
 
@@ -431,7 +469,7 @@ class PanelResults(_SummaryStr):
         return self._effects
 
     @property
-    def idiosyncratic(self):
+    def idiosyncratic(self) -> Series:
         """
         Idiosyncratic error
 
@@ -446,18 +484,20 @@ class PanelResults(_SummaryStr):
         return self._idiosyncratic
 
     @property
-    def wresids(self):
+    def wresids(self) -> Series:
         """Weighted model residuals"""
-        return Series(self._wresids.squeeze(), index=self._index, name='weighted residual')
+        return Series(
+            self._wresids.squeeze(), index=self._index, name="weighted residual"
+        )
 
     @property
-    def f_statistic_robust(self):
+    def f_statistic_robust(self) -> WaldTestStatistic:
         r"""
         Joint test of significance for non-constant regressors
 
         Returns
         -------
-        f_stat : WaldTestStatistic
+        WaldTestStatistic
             Statistic value, distribution and p-value
 
         Notes
@@ -483,13 +523,13 @@ class PanelResults(_SummaryStr):
         return self._deferred_f()
 
     @property
-    def f_statistic(self):
+    def f_statistic(self) -> WaldTestStatistic:
         r"""
         Joint test of significance for non-constant regressors
 
         Returns
         -------
-        f_stat : WaldTestStatistic
+        WaldTestStatistic
             Statistic value, distribution and p-value
 
         Notes
@@ -511,11 +551,17 @@ class PanelResults(_SummaryStr):
         return self._f_stat
 
     @property
-    def loglik(self):
+    def loglik(self) -> float:
         """Log-likelihood of model"""
         return self._loglik
 
-    def wald_test(self, restriction=None, value=None, *, formula=None):
+    def wald_test(
+        self,
+        restriction: Optional[Union[NDArray, DataFrame]] = None,
+        value: Optional[Union[NDArray, Series]] = None,
+        *,
+        formula: Optional[Union[str, List[str]]] = None,
+    ) -> WaldTestStatistic:
         r"""
         Test linear equality constraints using a Wald test
 
@@ -540,7 +586,7 @@ class PanelResults(_SummaryStr):
 
         Returns
         -------
-        t: WaldTestStatistic
+        WaldTestStatistic
             Test statistic for null that restrictions are valid.
 
         Notes
@@ -579,8 +625,9 @@ class PanelResults(_SummaryStr):
         >>> formula = 'union = married = 0'
         >>> fe_res.wald_test(formula=formula)
         """
-        return quadratic_form_test(self.params, self.cov, restriction=restriction,
-                                   value=value, formula=formula)
+        return quadratic_form_test(
+            self.params, self.cov, restriction=restriction, value=value, formula=formula
+        )
 
 
 class PanelEffectsResults(PanelResults):
@@ -588,7 +635,7 @@ class PanelEffectsResults(PanelResults):
     Results container for panel data models that include effects
     """
 
-    def __init__(self, res):
+    def __init__(self, res: AttrDict) -> None:
         super(PanelEffectsResults, self).__init__(res)
         self._other_info = res.other_info
         self._f_pooled = res.f_pooled
@@ -602,13 +649,13 @@ class PanelEffectsResults(PanelResults):
         self._effects = res.effects
 
     @property
-    def f_pooled(self):
+    def f_pooled(self) -> WaldTestStatistic:
         r"""
         Test that included effects are jointly zero.
 
         Returns
         -------
-        f_pooled : WaldTestStatistic
+        WaldTestStatistic
             Statistic value, distribution and p-value
 
         Notes
@@ -633,38 +680,42 @@ class PanelEffectsResults(PanelResults):
         return self._f_pooled
 
     @property
-    def included_effects(self):
+    def included_effects(self) -> List[str]:
         """List of effects included in the model"""
         entity_effect = self._entity_effect
         time_effect = self._time_effect
         other_effect = self._other_effect
+        effects = []
         if entity_effect or time_effect or other_effect:
-            effects = []
             if entity_effect:
-                effects.append('Entity')
+                effects.append("Entity")
             if time_effect:
-                effects.append('Time')
+                effects.append("Time")
             if other_effect:
                 oe = self.model._other_effect_cats.dataframe
                 for c in oe:
-                    effects.append('Other Effect (' + str(c) + ')')
-        else:
-            effects = []
+                    effects.append("Other Effect (" + str(c) + ")")
         return effects
 
     @property
-    def other_info(self):
+    def other_info(self) -> Optional[DataFrame]:
         """Statistics on observations per group for other effects"""
         return self._other_info
 
     @property
-    def rsquared_inclusive(self):
+    def rsquared_inclusive(self) -> float:
         """Model Coefficient of determination including fit of included effects"""
         return self._r2_ex_effects
 
     @property
-    def summary(self):
-        """:obj:`statsmodels.iolib.summary.Summary` : Summary table of model estimation results
+    def summary(self) -> Summary:
+        """
+        Model estimation summary.
+
+        Returns
+        -------
+        Summary
+            Summary table of model estimation results
 
         Supports export to csv, html and latex  using the methods ``summary.as_csv()``,
         ``summary.as_html()`` and ``summary.as_latex()``.
@@ -673,30 +724,34 @@ class PanelEffectsResults(PanelResults):
         smry = super(PanelEffectsResults, self).summary
 
         is_invalid = np.isfinite(self.f_pooled.stat)
-        f_pool = _str(self.f_pooled.stat) if is_invalid else '--'
-        f_pool_pval = pval_format(self.f_pooled.pval) if is_invalid else '--'
-        f_pool_name = self.f_pooled.dist_name if is_invalid else '--'
+        f_pool = _str(self.f_pooled.stat) if is_invalid else "--"
+        f_pool_pval = pval_format(self.f_pooled.pval) if is_invalid else "--"
+        f_pool_name = self.f_pooled.dist_name if is_invalid else "--"
 
         extra_text = []
         if is_invalid:
-            extra_text.append('F-test for Poolability: {0}'.format(f_pool))
-            extra_text.append('P-value: {0}'.format(f_pool_pval))
-            extra_text.append('Distribution: {0}'.format(f_pool_name))
-            extra_text.append('')
+            extra_text.append("F-test for Poolability: {0}".format(f_pool))
+            extra_text.append("P-value: {0}".format(f_pool_pval))
+            extra_text.append("Distribution: {0}".format(f_pool_name))
+            extra_text.append("")
 
         if self.included_effects:
-            effects = ', '.join(self.included_effects)
-            extra_text.append('Included effects: ' + effects)
+            effects = ", ".join(self.included_effects)
+            extra_text.append("Included effects: " + effects)
 
         if self.other_info is not None:
             ncol = self.other_info.shape[1]
-            extra_text.append('Model includes {0} other effects'.format(ncol))
+            extra_text.append("Model includes {0} other effects".format(ncol))
             for c in self.other_info.T:
                 col = self.other_info.T[c]
-                extra_text.append('Other Effect {0}:'.format(c))
-                stats = 'Avg Obs: {0}, Min Obs: {1}, Max Obs: {2}, Groups: {3}'
-                stats = stats.format(_str(col['mean']), _str(col['min']), _str(col['max']),
-                                     int(col['total']))
+                extra_text.append("Other Effect {0}:".format(c))
+                stats = "Avg Obs: {0}, Min Obs: {1}, Max Obs: {2}, Groups: {3}"
+                stats = stats.format(
+                    _str(col["mean"]),
+                    _str(col["min"]),
+                    _str(col["max"]),
+                    int(col["total"]),
+                )
                 extra_text.append(stats)
 
         smry.add_extra_txt(extra_text)
@@ -704,11 +759,11 @@ class PanelEffectsResults(PanelResults):
         return smry
 
     @property
-    def variance_decomposition(self):
+    def variance_decomposition(self) -> Series:
         """Decomposition of total variance into effects and residuals"""
         vals = [self._sigma2_effects, self._sigma2_eps, self._rho]
-        index = ['Effects', 'Residual', 'Percent due to Effects']
-        return Series(vals, index=index, name='Variance Decomposition')
+        index = ["Effects", "Residual", "Percent due to Effects"]
+        return Series(vals, index=index, name="Variance Decomposition")
 
 
 class RandomEffectsResults(PanelResults):
@@ -716,7 +771,7 @@ class RandomEffectsResults(PanelResults):
     Results container for random effect panel data models
     """
 
-    def __init__(self, res):
+    def __init__(self, res: AttrDict) -> None:
         super(RandomEffectsResults, self).__init__(res)
         self._theta = res.theta
         self._sigma2_effects = res.sigma2_effects
@@ -724,36 +779,41 @@ class RandomEffectsResults(PanelResults):
         self._rho = res.rho
 
     @property
-    def variance_decomposition(self):
+    def variance_decomposition(self) -> Series:
         """Decomposition of total variance into effects and residuals"""
         vals = [self._sigma2_effects, self._sigma2_eps, self._rho]
-        index = ['Effects', 'Residual', 'Percent due to Effects']
-        return Series(vals, index=index, name='Variance Decomposition')
+        index = ["Effects", "Residual", "Percent due to Effects"]
+        return Series(vals, index=index, name="Variance Decomposition")
 
     @property
-    def theta(self):
+    def theta(self) -> DataFrame:
         """Values used in generalized demeaning"""
         return self._theta
 
 
-def compare(results, precision='tstats'):
-    """
-    Compare the results of multiple models
+PanelModelResults = Union[PanelEffectsResults, PanelResults, RandomEffectsResults]
 
-    Parameters
-    ----------
-    results : {list, dict, OrderedDict}
-        Set of results to compare.  If a dict, the keys will be used as model
-        names.  An OrderedDict will preserve the model order the comparisons.
-    precision : {'tstats','std_errors', 'std-errors', 'pvalues'}
-        Estimator precision estimator to include in the comparison output.
-        Default is 'tstats'.
 
-    Returns
-    -------
-    comparison : PanelModelComparison
+class FamaMacBethResults(PanelResults):
     """
-    return PanelModelComparison(results, precision=precision)
+    Results container for Fama MacBeth panel data models
+    """
+
+    def __init__(self, res: AttrDict):
+        super().__init__(res)
+        self._all_params = res.all_params
+
+    @property
+    def all_params(self) -> DataFrame:
+        """
+        The set of parameters estimated for each of the time periods
+
+        Returns
+        -------
+        DataFrame
+            The parameters (nobs, nparam).
+        """
+        return self._all_params
 
 
 class PanelModelComparison(_ModelComparison):
@@ -762,46 +822,63 @@ class PanelModelComparison(_ModelComparison):
 
     Parameters
     ----------
-    results : {list, dict, OrderedDict}
+    results : {list, dict}
         Set of results to compare.  If a dict, the keys will be used as model
-        names.  An OrderedDict will preserve the model order the comparisons.
+        names.
     precision : {'tstats','std_errors', 'std-errors', 'pvalues'}
         Estimator precision estimator to include in the comparison output.
         Default is 'tstats'.
     """
-    _supported = (PanelEffectsResults, PanelResults, RandomEffectsResults)
 
-    def __init__(self, results, *, precision='tstats'):
+    _supported = (
+        PanelEffectsResults,
+        PanelResults,
+        RandomEffectsResults,
+        FamaMacBethResults,
+    )
+
+    def __init__(
+        self,
+        results: Union[List[PanelModelResults], Dict[str, PanelModelResults]],
+        *,
+        precision: str = "tstats",
+    ) -> None:
         super(PanelModelComparison, self).__init__(results, precision=precision)
 
     @property
-    def rsquared_between(self):
+    def rsquared_between(self) -> Series:
         """Coefficients of determination (R**2)"""
-        return self._get_property('rsquared_between')
+        return self._get_property("rsquared_between")
 
     @property
-    def rsquared_within(self):
+    def rsquared_within(self) -> Series:
         """Coefficients of determination (R**2)"""
-        return self._get_property('rsquared_within')
+        return self._get_property("rsquared_within")
 
     @property
-    def rsquared_overall(self):
+    def rsquared_overall(self) -> Series:
         """Coefficients of determination (R**2)"""
-        return self._get_property('rsquared_overall')
+        return self._get_property("rsquared_overall")
 
     @property
-    def estimator_method(self):
+    def estimator_method(self) -> Series:
         """Estimation methods"""
-        return self._get_property('name')
+        return self._get_property("name")
 
     @property
-    def cov_estimator(self):
+    def cov_estimator(self) -> Series:
         """Covariance estimator descriptions"""
-        return self._get_property('_cov_type')
+        return self._get_property("_cov_type")
 
     @property
-    def summary(self):
-        """:obj:`statsmodels.iolib.summary.Summary` : Summary table of model estimation results
+    def summary(self) -> Summary:
+        """
+        Model estimation summary.
+
+        Returns
+        -------
+        Summary
+            Summary table of model estimation results
 
         Supports export to csv, html and latex  using the methods ``summary.as_csv()``,
         ``summary.as_html()`` and ``summary.as_latex()``.
@@ -809,18 +886,38 @@ class PanelModelComparison(_ModelComparison):
 
         smry = Summary()
         models = list(self._results.keys())
-        title = 'Model Comparison'
-        stubs = ['Dep. Variable', 'Estimator', 'No. Observations', 'Cov. Est.', 'R-squared',
-                 'R-Squared (Within)', 'R-Squared (Between)', 'R-Squared (Overall)',
-                 'F-statistic', 'P-value (F-stat)']
+        title = "Model Comparison"
+        stubs = [
+            "Dep. Variable",
+            "Estimator",
+            "No. Observations",
+            "Cov. Est.",
+            "R-squared",
+            "R-Squared (Within)",
+            "R-Squared (Between)",
+            "R-Squared (Overall)",
+            "F-statistic",
+            "P-value (F-stat)",
+        ]
         dep_name = {}
         for key in self._results:
             dep_name[key] = self._results[key].model.dependent.vars[0]
         dep_name = Series(dep_name)
 
-        vals = concat([dep_name, self.estimator_method, self.nobs, self.cov_estimator,
-                       self.rsquared, self.rsquared_within, self.rsquared_between,
-                       self.rsquared_overall, self.f_statistic], 1)
+        vals = concat(
+            [
+                dep_name,
+                self.estimator_method,
+                self.nobs,
+                self.cov_estimator,
+                self.rsquared,
+                self.rsquared_within,
+                self.rsquared_between,
+                self.rsquared_overall,
+                self.f_statistic,
+            ],
+            1,
+        )
         vals = [[i for i in v] for v in vals.T.values]
         vals[2] = [str(v) for v in vals[2]]
         for i in range(4, len(vals)):
@@ -838,11 +935,11 @@ class PanelModelComparison(_ModelComparison):
             precision_fmt = []
             for v in precision.values[i]:
                 v_str = _str(v)
-                v_str = '({0})'.format(v_str) if v_str.strip() else v_str
+                v_str = "({0})".format(v_str) if v_str.strip() else v_str
                 precision_fmt.append(v_str)
             params_fmt.append(precision_fmt)
             params_stub.append(params.index[i])
-            params_stub.append(' ')
+            params_stub.append(" ")
 
         vals = table_concat((vals, params_fmt))
         stubs = stub_concat((stubs, params_stub))
@@ -850,32 +947,58 @@ class PanelModelComparison(_ModelComparison):
         all_effects = []
         for key in self._results:
             res = self._results[key]
-            effects = getattr(res, 'included_effects', [])
+            effects = getattr(res, "included_effects", [])
             all_effects.append(effects)
 
         neffect = max(map(len, all_effects))
         effects = []
-        effects_stub = ['Effects']
+        effects_stub = ["Effects"]
         for i in range(neffect):
             if i > 0:
-                effects_stub.append('')
+                effects_stub.append("")
             row = []
             for j in range(len(self._results)):
                 effect = all_effects[j]
                 if len(effect) > i:
                     row.append(effect[i])
                 else:
-                    row.append('')
+                    row.append("")
             effects.append(row)
         if effects:
             vals = table_concat((vals, effects))
             stubs = stub_concat((stubs, effects_stub))
 
         txt_fmt = default_txt_fmt.copy()
-        txt_fmt['data_aligns'] = 'r'
-        txt_fmt['header_align'] = 'r'
-        table = SimpleTable(vals, headers=models, title=title, stubs=stubs, txt_fmt=txt_fmt)
+        txt_fmt["data_aligns"] = "r"
+        txt_fmt["header_align"] = "r"
+        table = SimpleTable(
+            vals, headers=models, title=title, stubs=stubs, txt_fmt=txt_fmt
+        )
         smry.tables.append(table)
         prec_type = self._PRECISION_TYPES[self._precision]
-        smry.add_extra_txt(['{0} reported in parentheses'.format(prec_type)])
+        smry.add_extra_txt(["{0} reported in parentheses".format(prec_type)])
         return smry
+
+
+def compare(
+    results: Union[List[PanelModelResults], Dict[str, PanelModelResults]],
+    precision: str = "tstats",
+) -> PanelModelComparison:
+    """
+    Compare the results of multiple models
+
+    Parameters
+    ----------
+    results : {list, dict}
+        Set of results to compare.  If a dict, the keys will be used as model
+        names.
+    precision : {'tstats','std_errors', 'std-errors', 'pvalues'}
+        Estimator precision estimator to include in the comparison output.
+        Default is 'tstats'.
+
+    Returns
+    -------
+    PanelModelComparison
+        The model comparison object.
+    """
+    return PanelModelComparison(results, precision=precision)

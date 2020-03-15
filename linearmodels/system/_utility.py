@@ -1,9 +1,13 @@
+from typing import Optional, Union
+
 import numpy as np
 from numpy.linalg import inv, matrix_rank
 import pandas as pd
 
+from linearmodels.typing import ArraySequence, NDArray
 
-def blocked_column_product(x, s):
+
+def blocked_column_product(x: ArraySequence, s: NDArray) -> NDArray:
     """
     Parameters
     ----------
@@ -14,7 +18,7 @@ def blocked_column_product(x, s):
 
     Returns
     -------
-    bp : ndarray
+    ndarray
         Blocked product.  k x nobs rows and the number of columns is the same
         the number of columns as any member of x.
     """
@@ -28,7 +32,7 @@ def blocked_column_product(x, s):
     return np.vstack(out)
 
 
-def blocked_diag_product(x, s):
+def blocked_diag_product(x: ArraySequence, s: NDArray) -> NDArray:
     """
     Parameters
     ----------
@@ -39,7 +43,7 @@ def blocked_diag_product(x, s):
 
     Returns
     -------
-    bp : ndarray
+    ndarray
         Blocked product.  k x nobs rows and the number of columns is the same
         as the total number of columns in x.
     """
@@ -56,7 +60,7 @@ def blocked_diag_product(x, s):
     return out
 
 
-def blocked_inner_prod(x, s):
+def blocked_inner_prod(x: ArraySequence, s: NDArray) -> NDArray:
     r"""
     Parameters
     ----------
@@ -67,7 +71,7 @@ def blocked_inner_prod(x, s):
 
     Returns
     -------
-    ip : ndarray
+    ndarray
         Weighted inner product constructed from x and s
 
     Notes
@@ -82,15 +86,15 @@ def blocked_inner_prod(x, s):
     """
     k = len(x)
     widths = list(map(lambda m: m.shape[1], x))
-    s_is_diag = np.all((s - np.diag(np.diag(s))) == 0.0)
+    s_is_diag = np.all(np.asarray((s - np.diag(np.diag(s))) == 0.0))
 
     w0 = widths[0]
     homogeneous = all([w == w0 for w in widths])
     if homogeneous and not s_is_diag:
         # Fast path when all x have same number of columns
         # Slower than diag case when k is large since many 0s
-        x = np.hstack(x)
-        return x.T @ x * np.kron(s, np.ones((w0, w0)))
+        xa = np.hstack(x)
+        return xa.T @ xa * np.kron(s, np.ones((w0, w0)))
 
     cum_width = np.cumsum([0] + widths)
     total = sum(widths)
@@ -122,7 +126,7 @@ def blocked_inner_prod(x, s):
     return out
 
 
-def blocked_cross_prod(x, z, s):
+def blocked_cross_prod(x: ArraySequence, z: ArraySequence, s: NDArray) -> NDArray:
     r"""
     Parameters
     ----------
@@ -135,7 +139,7 @@ def blocked_cross_prod(x, z, s):
 
     Returns
     -------
-    xp : ndarray
+    ndarray
         Weighted cross product constructed from x and s
 
     Notes
@@ -159,7 +163,7 @@ def blocked_cross_prod(x, z, s):
     return np.concatenate(xp, 0)
 
 
-def blocked_full_inner_product(x, s):
+def blocked_full_inner_product(x: NDArray, s: NDArray) -> NDArray:
     r"""
     Parameters
     ----------
@@ -182,12 +186,12 @@ def blocked_full_inner_product(x, s):
     for i in range(k):
         v = s[i, 0] * x[0:t]
         for j in range(1, k):
-            v += s[i, j] * x[j * t:(j + 1) * t]
-        sx[i * t:(i + 1) * t] = v
+            v += s[i, j] * x[j * t : (j + 1) * t]
+        sx[i * t : (i + 1) * t] = v
     return x.T @ sx
 
 
-def inv_matrix_sqrt(s):
+def inv_matrix_sqrt(s: NDArray) -> NDArray:
     vecs, vals = np.linalg.eigh(s)
     vecs = 1.0 / np.sqrt(vecs)
     out = vals @ np.diag(vecs) @ vals.T
@@ -218,22 +222,28 @@ class LinearConstraint(object):
         r \beta = q
     """
 
-    def __init__(self, r, q=None, num_params=None, require_pandas=True):
+    def __init__(
+        self,
+        r: Union[pd.DataFrame, np.ndarray],
+        q: Optional[Union[pd.Series, np.ndarray]] = None,
+        num_params: Optional[int] = None,
+        require_pandas: bool = True,
+    ) -> None:
         if not isinstance(r, (pd.DataFrame, np.ndarray)):
-            raise TypeError('r must be an array or DataFrame')
+            raise TypeError("r must be an array or DataFrame")
         elif require_pandas and not isinstance(r, pd.DataFrame):
-            raise TypeError('r must be a DataFrame')
+            raise TypeError("r must be a DataFrame")
         if r.ndim != 2:
-            raise ValueError('r must be 2-dimensional')
+            raise ValueError("r must be 2-dimensional")
         r_pd = pd.DataFrame(r)
         ra = np.asarray(r, dtype=np.float64)
         self._r_pd = r_pd
         self._ra = ra
         if q is not None:
             if require_pandas and not isinstance(q, pd.Series):
-                raise TypeError('q must be a Series')
+                raise TypeError("q must be a Series")
             elif not isinstance(q, (pd.Series, np.ndarray)):
-                raise TypeError('q must be a Series')
+                raise TypeError("q must be a Series")
             q_pd = pd.Series(q, index=r_pd.index)
         else:
             q_pd = pd.Series(np.zeros(r_pd.shape[0]), index=r_pd.index)
@@ -243,29 +253,30 @@ class LinearConstraint(object):
         self._num_params = num_params
         self._verify_constraints()
 
-    def __repr__(self):
-        return self.__str__() + '\nid: ' + str(hex(id(self)))
+    def __repr__(self) -> str:
+        return self.__str__() + "\nid: " + str(hex(id(self)))
 
-    def __str__(self):
-        return 'Linear Constraint with {0} constraints'.format(self._ra.shape[0])
+    def __str__(self) -> str:
+        return "Linear Constraint with {0} constraints".format(self._ra.shape[0])
 
-    def _verify_constraints(self):
+    def _verify_constraints(self) -> None:
         r = self._ra
         q = self._qa
         if r.shape[0] != q.shape[0]:
-            raise ValueError('Constraint inputs are not shape compatible')
+            raise ValueError("Constraint inputs are not shape compatible")
         if self._num_params is not None:
             if r.shape[1] != self._num_params:
-                raise ValueError('r is incompatible with the number of model '
-                                 'parameters')
+                raise ValueError(
+                    "r is incompatible with the number of model " "parameters"
+                )
         rq = np.c_[r, q[:, None]]
         if not np.all(np.isfinite(rq)) or matrix_rank(rq) < rq.shape[0]:
-            raise ValueError('Constraints must be non-redundant')
+            raise ValueError("Constraints must be non-redundant")
         qr = np.linalg.qr(rq)
         if matrix_rank(qr[1][:, :-1]) != matrix_rank(qr[1]):
-            raise ValueError('One or more constraints are infeasible')
+            raise ValueError("One or more constraints are infeasible")
 
-    def _compute_transform(self):
+    def _compute_transform(self) -> None:
         r = self._ra
         c, k = r.shape
         m = np.eye(k) - r.T @ inv(r @ r.T) @ r
@@ -274,24 +285,24 @@ class LinearConstraint(object):
         vecs = np.real(vecs)
         idx = np.argsort(vals)[::-1]
         vecs = vecs[:, idx]
-        t, left = vecs[:, :k - c], vecs[:, k - c:]
+        t, left = vecs[:, : k - c], vecs[:, k - c :]
         q = self._qa[:, None]
         a = q.T @ inv(left.T @ r.T) @ left.T
         self._t, self._l, self._a = t, left, a
 
     @property
-    def r(self):
-        """Constrain loading matrix"""
+    def r(self) -> pd.DataFrame:
+        """Constraint loading matrix"""
         return self._r_pd
 
     @property
-    def t(self):
+    def t(self) -> NDArray:
         """
         Constraint transformation matrix
 
         Returns
         -------
-        t : ndarray
+        ndarray
             Constraint transformation matrix
 
         Notes
@@ -303,13 +314,13 @@ class LinearConstraint(object):
         return self._t
 
     @property
-    def a(self):
+    def a(self) -> NDArray:
         r"""
         Transformed constraint target
 
         Returns
         -------
-        a : ndarray
+        ndarray
             Transformed target
 
         Notes
@@ -333,6 +344,6 @@ class LinearConstraint(object):
         return self._a
 
     @property
-    def q(self):
+    def q(self) -> Union[pd.Series, np.ndarray]:
         """Constrain target values"""
         return self._q_pd

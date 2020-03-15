@@ -1,9 +1,15 @@
+from linearmodels.compat.pandas import concat
+
 from collections import defaultdict
-from typing import List
+from typing import Dict, List, NamedTuple, Optional, Sequence, Tuple, TypeVar, Union
 
 import numpy as np
-import pandas as pd
+from pandas import DataFrame, date_range
 import scipy.sparse as sp
+
+from linearmodels.shared.utility import panel_to_frame
+from linearmodels.typing import NDArray
+from linearmodels.typing.data import ArrayLike
 
 try:
     from linearmodels.panel._utility import _drop_singletons
@@ -41,12 +47,19 @@ Variables have been fully absorbed and have removed from the regression:
 {absorbed_variables}
 """
 
+SparseArray = TypeVar("SparseArray", sp.csc_matrix, sp.csr_matrix, sp.coo_matrix)
+SparseOrDense = TypeVar(
+    "SparseOrDense", NDArray, sp.csc_matrix, sp.csr_matrix, sp.coo_matrix
+)
 
-def preconditioner(d, *, copy=False):
+
+def preconditioner(
+    d: SparseOrDense, *, copy: bool = False
+) -> Tuple[SparseOrDense, NDArray]:
     """
     Parameters
     ----------
-    d : array-like
+    d : array_like
         Array to precondition
     copy : bool
         Flag indicating whether the operation should be in-place, if possible.
@@ -54,12 +67,12 @@ def preconditioner(d, *, copy=False):
 
     Returns
     -------
-        d : array-like
-            Array with same type as input array. If copy is False, and d is
-            an ndarray or a csc_matrix, then the operation is inplace
-        cond : ndarray
-            Array of conditioning numbers defined as the square root of the column
-            2-norms (nvar,)
+    d : array_like
+        Array with same type as input array. If copy is False, and d is
+        an ndarray or a csc_matrix, then the operation is inplace
+    cond : ndarray
+        Array of conditioning numbers defined as the square root of the column
+        2-norms (nvar,)
     """
     # Dense path
     if not sp.issparse(d):
@@ -92,14 +105,21 @@ def preconditioner(d, *, copy=False):
     return d, cond
 
 
-def dummy_matrix(cats, *, format='csc', drop='first', drop_all=False, precondition=True):
+def dummy_matrix(
+    cats: ArrayLike,
+    *,
+    output_format: str = "csc",
+    drop: str = "first",
+    drop_all: bool = False,
+    precondition: bool = True,
+) -> Tuple[Union[sp.csc_matrix, sp.csr_matrix, sp.coo_matrix, NDArray], NDArray]:
     """
     Parameters
     ----------
     cats: {DataFrame, ndarray}
         Array containing the category codes of pandas categoricals
         (nobs, ncats)
-    format: {'csc', 'csr', 'coo', 'array'}
+    output_format: {'csc', 'csr', 'coo', 'array'}
         Output format. Default is csc (csc_matrix). Supported output
         formats are:
 
@@ -119,55 +139,61 @@ def dummy_matrix(cats, *, format='csc', drop='first', drop_all=False, preconditi
 
     Returns
     -------
-    dummies : array-like
+    dummies : array_like
         Array, either sparse or dense, of size nobs x ncats containing the
         dummy variable values
     cond : ndarray
         Conditioning number of each column
     """
-    if isinstance(cats, pd.DataFrame):
+    if isinstance(cats, DataFrame):
         codes = np.column_stack([np.asarray(cats[c].cat.codes) for c in cats])
     else:
         codes = cats
 
-    data = defaultdict(list)
+    data: Dict[str, List[np.ndarray]] = defaultdict(list)
     total_dummies = 0
     nobs, ncats = codes.shape
     for i in range(ncats):
         rows = np.arange(nobs)
         ucats, inverse = np.unique(codes[:, i], return_inverse=True)
         ncategories = len(ucats)
-        bits = min([i for i in (8, 16, 32, 64) if i - 1 > np.log2(ncategories + total_dummies)])
-        replacements = np.arange(ncategories, dtype='int{:d}'.format(bits))
+        bits = min(
+            [i for i in (8, 16, 32, 64) if i - 1 > np.log2(ncategories + total_dummies)]
+        )
+        replacements = np.arange(ncategories, dtype="int{:d}".format(bits))
         cols = replacements[inverse]
         if i == 0 and not drop_all:
             retain = np.arange(nobs)
-        elif drop == 'first':
+        elif drop == "first":
             # remove first
             retain = cols != 0
         else:  # drop == 'last'
             # remove last
             retain = cols != (ncategories - 1)
         rows = rows[retain]
-        col_adj = -1 if (drop == 'first' and i > 0) else 0
+        col_adj = -1 if (drop == "first" and i > 0) else 0
         cols = cols[retain] + total_dummies + col_adj
         values = np.ones(rows.shape)
-        data['values'].append(values)
-        data['rows'].append(rows)
-        data['cols'].append(cols)
+        data["values"].append(values)
+        data["rows"].append(rows)
+        data["cols"].append(cols)
         total_dummies += ncategories - (i > 0)
 
-    if format in ('csc', 'array'):
+    if output_format in ("csc", "array"):
         fmt = sp.csc_matrix
-    elif format == 'csr':
+    elif output_format == "csr":
         fmt = sp.csr_matrix
-    elif format == 'coo':
+    elif output_format == "coo":
         fmt = sp.coo_matrix
     else:
-        raise ValueError('Unknown format: {0}'.format(format))
-    out = fmt((np.concatenate(data['values']),
-               (np.concatenate(data['rows']), np.concatenate(data['cols']))))
-    if format == 'array':
+        raise ValueError("Unknown format: {0}".format(output_format))
+    out = fmt(
+        (
+            np.concatenate(data["values"]),
+            (np.concatenate(data["rows"]), np.concatenate(data["cols"])),
+        )
+    )
+    if output_format == "array":
         out = out.toarray()
 
     if precondition:
@@ -178,7 +204,7 @@ def dummy_matrix(cats, *, format='csc', drop='first', drop_all=False, preconditi
     return out, cond
 
 
-def _remove_node(node, meta, orig_dest):
+def _remove_node(node: int, meta: NDArray, orig_dest: NDArray) -> Tuple[int, int]:
     """
     Parameters
     ----------
@@ -196,6 +222,7 @@ def _remove_node(node, meta, orig_dest):
         ID of the next node in the branch
     next_count : int
         Count of the next node in the branch
+
     Notes
     -----
     Node has 1 link, so:
@@ -232,7 +259,7 @@ def _remove_node(node, meta, orig_dest):
     return next_node, next_count
 
 
-def _py_drop_singletons(meta, orig_dest):
+def _py_drop_singletons(meta: NDArray, orig_dest: NDArray) -> None:
     """
     Loop through the nodes and recursively drop singleton chains
 
@@ -257,7 +284,7 @@ if not HAS_CYTHON:
     _drop_singletons = _py_drop_singletons  # noqa: F811
 
 
-def in_2core_graph(cats):
+def in_2core_graph(cats: ArrayLike) -> NDArray:
     """
     Parameters
     ----------
@@ -270,7 +297,7 @@ def in_2core_graph(cats):
     retain : ndarray
         Boolean array that marks non-singleton entries as True
     """
-    if isinstance(cats, pd.DataFrame):
+    if isinstance(cats, DataFrame):
         cats = np.column_stack([np.asarray(cats[c].cat.codes) for c in cats])
     if cats.shape[1] == 1:
         # Fast, simple path
@@ -279,41 +306,43 @@ def in_2core_graph(cats):
         return np.isin(cats, retain).ravel()
 
     nobs, ncats = cats.shape
-    zero_cats = []
+    zero_cats_lst = []
     # Switch to 0 based indexing
     for col in range(ncats):
         u, inv = np.unique(cats[:, col], return_inverse=True)
-        zero_cats.append(np.arange(u.shape[0])[inv])
-    zero_cats = np.column_stack(zero_cats)
+        zero_cats_lst.append(np.arange(u.shape[0])[inv])
+    zero_cats = np.column_stack(zero_cats_lst)
     # 2 tables
     # a.
     #    origin_id, dest_id
     max_cat = zero_cats.max(0)
     shift = np.r_[0, max_cat[:-1] + 1]
     zero_cats += shift
-    orig_dest = []
+    orig_dest_lst = []
+    inverter = np.empty_like(zero_cats[:, 0])
     for i in range(ncats):
         col_order = list(range(ncats))
         col_order.remove(i)
         col_order = [i] + col_order
         temp = zero_cats[:, col_order]
         idx = np.argsort(temp[:, 0])
-        orig_dest.append(temp[idx])
+        orig_dest_lst.append(temp[idx])
         if i == 0:
-            inverter = np.empty_like(zero_cats[:, 0])
             inverter[idx] = np.arange(nobs)
-    orig_dest = np.concatenate(orig_dest, 0)
+    orig_dest = np.concatenate(orig_dest_lst, 0)
     # b.
     #    node_id, count, offset
     node_id, count = np.unique(orig_dest[:, 0], return_counts=True)
     offset = np.r_[0, np.where(np.diff(orig_dest[:, 0]) != 0)[0] + 1]
 
-    def min_dtype(*args):
+    def min_dtype(*args: NDArray) -> str:
         bits = max([np.log2(max(arg.max(), 1)) for arg in args])
-        return 'int{0}'.format(min([i for i in (8, 16, 32, 64) if bits < (i - 1)]))
+        return "int{0}".format(min([j for j in (8, 16, 32, 64) if bits < (j - 1)]))
 
     dtype = min_dtype(offset, node_id, count, orig_dest)
-    meta = np.column_stack([node_id.astype(dtype), count.astype(dtype), offset.astype(dtype)])
+    meta = np.column_stack(
+        [node_id.astype(dtype), count.astype(dtype), offset.astype(dtype)]
+    )
     orig_dest = orig_dest.astype(dtype)
 
     singletons = np.any(meta[:, 1] == 1)
@@ -328,7 +357,7 @@ def in_2core_graph(cats):
     return retain
 
 
-def in_2core_graph_slow(cats):
+def in_2core_graph_slow(cats: ArrayLike) -> NDArray:
     """
     Parameters
     ----------
@@ -346,7 +375,7 @@ def in_2core_graph_slow(cats):
     This is a reference implementation that can be very slow to remove
     all singleton nodes in some graphs.
     """
-    if isinstance(cats, pd.DataFrame):
+    if isinstance(cats, DataFrame):
         cats = np.column_stack([np.asarray(cats[c].cat.codes) for c in cats])
     if cats.shape[1] == 1:
         return in_2core_graph(cats)
@@ -367,7 +396,7 @@ def in_2core_graph_slow(cats):
     return retain
 
 
-def check_absorbed(x: np.ndarray, variables: List[str]):
+def check_absorbed(x: NDArray, variables: Sequence[str]) -> None:
     """
     Check a regressor matrix for variables absorbed
 
@@ -378,23 +407,26 @@ def check_absorbed(x: np.ndarray, variables: List[str]):
     variables : List[str]
         List of variable names
     """
-    if np.linalg.matrix_rank(x) < x.shape[1]:
+    rank = np.linalg.matrix_rank(x)
+    if rank < x.shape[1]:
         xpx = x.T @ x
         vals, vecs = np.linalg.eigh(xpx)
-        tol = vals.max() * x.shape[1] * np.finfo(np.float64).eps
-        absorbed = vals < tol
-        nabsorbed = absorbed.sum()
+        nabsorbed = x.shape[1] - rank
+        tol = np.sort(vals)[nabsorbed - 1]
+        absorbed = vals <= tol
         absorbed_vecs = vecs[:, absorbed]
         rows = []
         for i in range(nabsorbed):
+            abs_vec = np.abs(absorbed_vecs[:, i])
+            tol = abs_vec.max() * np.finfo(np.float64).eps * abs_vec.shape[0]
             vars_idx = np.where(np.abs(absorbed_vecs[:, i]) > tol)[0]
-            rows.append(' ' * 10 + ', '.join((variables[vi] for vi in vars_idx)))
-        absorbed_variables = '\n'.join(rows)
+            rows.append(" " * 10 + ", ".join((variables[vi] for vi in vars_idx)))
+        absorbed_variables = "\n".join(rows)
         msg = absorbing_error_msg.format(absorbed_variables=absorbed_variables)
         raise AbsorbingEffectError(msg)
 
 
-def not_absorbed(x: np.ndarray):
+def not_absorbed(x: NDArray) -> List[int]:
     """
     Construct a list of the indices of regressors that are not absorbed
 
@@ -420,3 +452,143 @@ def not_absorbed(x: np.ndarray):
     drop = np.where(np.abs(np.diag(r)) < threshold)[0]
     retain = set(range(x.shape[1])).difference(drop)
     return sorted(retain)
+
+
+class PanelModelData(NamedTuple):
+    """
+    Typed namedtuple to hold simulated panel data
+    """
+
+    data: DataFrame
+    weights: DataFrame
+    other_effects: DataFrame
+    clusters: DataFrame
+
+
+def generate_panel_data(
+    nentity: int = 971,
+    ntime: int = 7,
+    nexog: int = 5,
+    const: bool = False,
+    missing: float = 0,
+    other_effects: int = 2,
+    ncats: Union[int, List[int]] = 4,
+    rng: Optional[np.random.RandomState] = None,
+) -> PanelModelData:
+    """
+
+    Parameters
+    ----------
+    nentity : int, default 971
+        The number of entities in the panel.
+    ntime : int, default 7
+        The number of time periods in the panel.
+    nexog : int, default 5
+        The number of explanatory variables in the dataset.
+    const : bool, default False
+        Flag indicating that the model should include a constant.
+    missing : float, default 0
+        The percentage of values that are missing. Should be between 0 and 100.
+    other_effects : int, default 2
+        The number of other effects generated.
+    ncats : Union[int, Sequence[int]], default 4
+        The number of categories to use in other_effects and variance
+        clusters. If list-like, then it must have as many elements
+        as other_effects.
+    rng : RandomState, default None
+        A NumPy RandomState instance. If not provided, one is initialized
+        using a fixed seed.
+
+    Returns
+    -------
+    PanelModelData
+        A namedtuple derived class containing 4 DataFrames:
+
+        * `data` - A simulated data with variables y and x# for # in 0,...,4.
+          If const is True, then also contains a column named const.
+        * `weights` - Simulated non-negative weights.
+        * `other_effects` - Simulated effects.
+        * `clusters` - Simulated data to use in clustered covariance estimation.
+    """
+    if rng is None:
+        rng = np.random.RandomState(
+            [
+                0xA14E2429,
+                0x448D2E51,
+                0x91B558E7,
+                0x6A3F5CD2,
+                0x22B43ABB,
+                0xE746C92D,
+                0xCE691A7D,
+                0x66746EE7,
+            ]
+        )
+
+    n, t, k = nentity, ntime, nexog
+    k += int(const)
+    x = rng.standard_normal((k, t, n))
+    beta = np.arange(1, k + 1)[:, None, None] / k
+    y = (
+        (x * beta).sum(0)
+        + rng.standard_normal((t, n))
+        + 2 * rng.standard_normal((1, n))
+    )
+    w = rng.chisquare(5, (t, n)) / 5
+    c = None
+    cats = [f"cat.{i}" for i in range(other_effects)]
+    if other_effects:
+        if not isinstance(ncats, list):
+            ncats = [ncats] * other_effects
+        c = []
+        for i in range(other_effects):
+            nc = ncats[i]
+            c.append(rng.randint(0, nc, (1, t, n)))
+        c = np.concatenate(c, 0)
+
+    vcats = [f"varcat.{i}" for i in range(2)]
+    vc2 = np.ones((2, t, 1)) @ rng.randint(0, n // 2, (2, 1, n))
+    vc1 = vc2[[0]]
+
+    if const:
+        x[0] = 1.0
+
+    if missing > 0:
+        locs = rng.choice(n * t, int(n * t * missing))
+        y.flat[locs] = np.nan
+        locs = rng.choice(n * t * k, int(n * t * k * missing))
+        x.flat[locs] = np.nan
+
+    entities = [f"firm{i}" for i in range(n)]
+    time = date_range("1-1-1900", periods=t, freq="A-DEC")
+    var_names = [f"x{i}" for i in range(k)]
+    if const:
+        var_names[1:] = var_names[:-1]
+        var_names[0] = "const"
+    # y = DataFrame(y, index=time, columns=entities)
+    y_df = panel_to_frame(
+        y[None], items=["y"], major_axis=time, minor_axis=entities, swap=True
+    )
+    index = y_df.index
+    w_df = panel_to_frame(
+        w[None], items=["w"], major_axis=time, minor_axis=entities, swap=True
+    )
+    w_df = w_df.reindex(index)
+    x_df = panel_to_frame(
+        x, items=var_names, major_axis=time, minor_axis=entities, swap=True
+    )
+    x_df = x_df.reindex(index)
+    c_df = panel_to_frame(
+        c, items=cats, major_axis=time, minor_axis=entities, swap=True
+    )
+    other_eff = c_df.reindex(index)
+    vc1_df = panel_to_frame(
+        vc1, items=vcats[:1], major_axis=time, minor_axis=entities, swap=True
+    )
+    vc1_df = vc1_df.reindex(index)
+    vc2_df = panel_to_frame(
+        vc2, items=vcats, major_axis=time, minor_axis=entities, swap=True
+    )
+    vc2_df = vc2_df.reindex(index)
+    clusters = concat([vc1_df, vc2_df])
+    data = concat([y_df, x_df], axis=1)
+    return PanelModelData(data, w_df, other_eff, clusters)

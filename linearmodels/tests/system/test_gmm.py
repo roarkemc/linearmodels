@@ -1,6 +1,5 @@
 from linearmodels.compat.pandas import concat
 
-from collections import OrderedDict
 from itertools import product
 
 import numpy as np
@@ -10,51 +9,53 @@ from pandas.testing import assert_frame_equal, assert_series_equal
 import pytest
 
 from linearmodels.iv.covariance import kernel_weight_parzen
+from linearmodels.shared.utility import AttrDict
 from linearmodels.system import IV3SLS, IVSystemGMM
-from linearmodels.system.gmm import (HeteroskedasticWeightMatrix,
-                                     HomoskedasticWeightMatrix,
-                                     KernelWeightMatrix)
-from linearmodels.tests.system._utility import (generate_3sls_data_v2,
-                                                simple_gmm)
-from linearmodels.utility import AttrDict
+from linearmodels.system.gmm import (
+    HeteroskedasticWeightMatrix,
+    HomoskedasticWeightMatrix,
+    KernelWeightMatrix,
+)
+from linearmodels.tests.system._utility import generate_3sls_data_v2, simple_gmm
 
 params = list(product([1, 2], [True, False]))
 
 
 def gen_id(r):
-    id = 'steps:{0}'.format(r[0])
+    _id = "steps:{0}".format(r[0])
     if r[1]:
-        id += ',robust'
+        _id += ",robust"
     else:
-        id += ',unadjusted'
-    return id
+        _id += ",unadjusted"
+    return _id
 
 
 ids = list(map(gen_id, params))
 
 
-@pytest.fixture(scope='module', params=params, ids=ids)
+@pytest.fixture(scope="module", params=params, ids=ids)
 def data(request):
     steps, robust = request.param
-    weight_type = 'robust' if robust else 'unadjusted'
+    weight_type = "robust" if robust else "unadjusted"
     eqns = generate_3sls_data_v2(k=3)
     y = [eqns[key].dependent for key in eqns]
     x = [np.concatenate([eqns[key].exog, eqns[key].endog], 1) for key in eqns]
     z = [np.concatenate([eqns[key].exog, eqns[key].instruments], 1) for key in eqns]
 
-    return AttrDict(eqns=eqns, x=x, y=y, z=z, steps=steps,
-                    robust=robust, weight_type=weight_type)
+    return AttrDict(
+        eqns=eqns, x=x, y=y, z=z, steps=steps, robust=robust, weight_type=weight_type
+    )
 
 
-@pytest.fixture(scope='module')
+@pytest.fixture(scope="module")
 def weight_data():
     eqns = generate_3sls_data_v2(k=2)
     mod = IV3SLS(eqns)
     x = mod._x
     z = mod._z
-    res = mod.fit(cov_type='unadjusted')
-    eps = res.resids.values
-    sigma = res.sigma
+    res = mod.fit(cov_type="unadjusted")
+    eps = np.asarray(res.resids)
+    sigma = np.asarray(res.sigma)
     return x, z, eps, sigma
 
 
@@ -91,11 +92,11 @@ def test_cov(data):
     mod = IVSystemGMM(data.eqns, weight_type=data.weight_type)
     res = mod.fit(cov_type=data.weight_type, iter_limit=data.steps)
     simple = simple_gmm(data.y, data.x, data.z, data.robust, steps=data.steps)
-    assert_allclose(res.cov.values, simple.cov)
+    assert_allclose(np.asarray(res.cov), simple.cov)
 
 
 def test_formula_equivalence(data):
-    mod = IVSystemGMM(data.eqns, weight_type='unadjusted')
+    mod = IVSystemGMM(data.eqns, weight_type="unadjusted")
     formula = []
     df = []
     for i, key in enumerate(data.eqns):
@@ -104,93 +105,108 @@ def test_formula_equivalence(data):
         ex = eqn.exog
         en = eqn.endog
         instr = eqn.instruments
-        dep = DataFrame(dep, columns=['dep_{0}'.format(i)])
+        dep = DataFrame(dep, columns=["dep_{0}".format(i)])
         has_const = False
         if np.any(np.all(ex == 1, 0)):
             ex = ex[:, 1:]
             has_const = True
-        ex = DataFrame(ex, columns=['ex_{0}_{1}'.format(i, j) for j in range(ex.shape[1])])
-        en = DataFrame(en, columns=['en_{0}_{1}'.format(i, j) for j in range(en.shape[1])])
-        instr = DataFrame(instr, columns=['instr_{0}_{1}'.format(i, j)
-                                          for j in range(ex.shape[1])])
-        fmla = ''.join(dep.columns) + ' ~  '
+        ex = DataFrame(
+            ex, columns=["ex_{0}_{1}".format(i, j) for j in range(ex.shape[1])]
+        )
+        en = DataFrame(
+            en, columns=["en_{0}_{1}".format(i, j) for j in range(en.shape[1])]
+        )
+        instr = DataFrame(
+            instr, columns=["instr_{0}_{1}".format(i, j) for j in range(ex.shape[1])]
+        )
+        fmla = "".join(dep.columns) + " ~  "
         if has_const:
-            fmla += ' 1 + '
-        fmla += ' + '.join(ex.columns) + ' + ['
-        fmla += ' + '.join(en.columns) + ' ~ '
-        fmla += ' + '.join(instr.columns) + ' ] '
+            fmla += " 1 + "
+        fmla += " + ".join(ex.columns) + " + ["
+        fmla += " + ".join(en.columns) + " ~ "
+        fmla += " + ".join(instr.columns) + " ] "
         formula.append(fmla)
         df.extend([dep, ex, en, instr])
-    from collections import OrderedDict
-    formulas = OrderedDict()
+
+    formulas = {}
     for i, f in enumerate(formula):
-        formulas['eq{0}'.format(i)] = f
+        formulas["eq{0}".format(i)] = f
     df = concat(df, 1)
-    formula_mod = IVSystemGMM.from_formula(formulas, df, weight_type='unadjusted')
-    res = mod.fit(cov_type='unadjusted')
-    formula_res = formula_mod.fit(cov_type='unadjusted')
+    formula_mod = IVSystemGMM.from_formula(formulas, df, weight_type="unadjusted")
+    res = mod.fit(cov_type="unadjusted")
+    formula_res = formula_mod.fit(cov_type="unadjusted")
     assert_allclose(res.params, formula_res.params)
 
 
 def test_formula_equivalence_weights(data):
-    weights = AttrDict()
+    weights = {}
     eqn_copy = AttrDict()
     for key in data.eqns:
         eqn = {k: v for k, v in data.eqns[key].items()}
-        nobs = eqn['dependent'].shape[0]
+        nobs = eqn["dependent"].shape[0]
         w = np.random.chisquare(2, (nobs, 1)) / 2
         weights[key] = w
-        eqn['weights'] = w
+        eqn["weights"] = w
         eqn_copy[key] = eqn
 
-    mod = IVSystemGMM(eqn_copy, weight_type='unadjusted')
+    mod = IVSystemGMM(eqn_copy, weight_type="unadjusted")
     df = []
-    formulas = OrderedDict()
+    formulas = {}
     for i, key in enumerate(data.eqns):
         eqn = data.eqns[key]
         dep = eqn.dependent
         ex = eqn.exog
         en = eqn.endog
         instr = eqn.instruments
-        dep = DataFrame(dep, columns=['dep_{0}'.format(i)])
+        dep = DataFrame(dep, columns=["dep_{0}".format(i)])
         has_const = False
         if np.any(np.all(ex == 1, 0)):
             ex = ex[:, 1:]
             has_const = True
-        ex = DataFrame(ex, columns=['ex_{0}_{1}'.format(i, j) for j in range(ex.shape[1])])
-        en = DataFrame(en, columns=['en_{0}_{1}'.format(i, j) for j in range(en.shape[1])])
-        instr = DataFrame(instr, columns=['instr_{0}_{1}'.format(i, j)
-                                          for j in range(ex.shape[1])])
-        fmla = ''.join(dep.columns) + ' ~  '
+        ex = DataFrame(
+            ex, columns=["ex_{0}_{1}".format(i, j) for j in range(ex.shape[1])]
+        )
+        en = DataFrame(
+            en, columns=["en_{0}_{1}".format(i, j) for j in range(en.shape[1])]
+        )
+        instr = DataFrame(
+            instr, columns=["instr_{0}_{1}".format(i, j) for j in range(ex.shape[1])]
+        )
+        fmla = "".join(dep.columns) + " ~  "
         if has_const:
-            fmla += ' 1 + '
-        fmla += ' + '.join(ex.columns) + ' + ['
-        fmla += ' + '.join(en.columns) + ' ~ '
-        fmla += ' + '.join(instr.columns) + ' ] '
+            fmla += " 1 + "
+        fmla += " + ".join(ex.columns) + " + ["
+        fmla += " + ".join(en.columns) + " ~ "
+        fmla += " + ".join(instr.columns) + " ] "
         formulas[key] = fmla
         df.extend([dep, ex, en, instr])
     df = concat(df, 1)
-    formula_mod = IVSystemGMM.from_formula(formulas, df, weights=weights, weight_type='unadjusted')
-    res = mod.fit(cov_type='unadjusted')
-    formula_res = formula_mod.fit(cov_type='unadjusted')
+    formula_mod = IVSystemGMM.from_formula(
+        formulas, df, weights=weights, weight_type="unadjusted"
+    )
+    res = mod.fit(cov_type="unadjusted")
+    formula_res = formula_mod.fit(cov_type="unadjusted")
     assert_allclose(res.params, formula_res.params)
 
 
 def test_weight_options(data):
-    mod = IVSystemGMM(data.eqns, weight_type='unadjusted', debiased=True, center=True)
-    res = mod.fit(cov_type='unadjusted')
-    assert res.weight_config == {'debiased': True, 'center': True}
-    assert res.weight_type == 'unadjusted'
-    assert 'Debiased: True' in str(res.summary)
+    mod = IVSystemGMM(data.eqns, weight_type="unadjusted", debiased=True, center=True)
+    res = mod.fit(cov_type="unadjusted")
+    assert res.weight_config == {"debiased": True, "center": True}
+    assert res.weight_type == "unadjusted"
+    assert "Debiased: True" in str(res.summary)
     assert str(hex(id(res._weight_estimtor))) in res._weight_estimtor.__repr__()
-    assert res._weight_estimtor.config == {'debiased': True, 'center': True}
-    base_res = IVSystemGMM(data.eqns, weight_type='unadjusted').fit(cov_type='unadjusted')
+    assert res._weight_estimtor.config == {"debiased": True, "center": True}
+    base_res = IVSystemGMM(data.eqns, weight_type="unadjusted").fit(
+        cov_type="unadjusted"
+    )
     assert np.all(np.diag(res.w) >= np.diag(base_res.w))
 
-    mod = IVSystemGMM(data.eqns, weight_type='robust', debiased=True)
-    res = mod.fit(cov_type='robust')
+    mod = IVSystemGMM(data.eqns, weight_type="robust", debiased=True)
+    mod.fit(cov_type="robust")
 
 
+@pytest.mark.smoke
 def test_no_constant_smoke():
     eqns = generate_3sls_data_v2(k=3, const=False)
     mod = IVSystemGMM(eqns)
@@ -199,21 +215,23 @@ def test_no_constant_smoke():
 
 def test_unknown_weight_type(data):
     with pytest.raises(ValueError):
-        IVSystemGMM(data.eqns, weight_type='unknown')
+        IVSystemGMM(data.eqns, weight_type="unknown")
 
 
 def test_unknown_cov_type(data):
     mod = IVSystemGMM(data.eqns)
     with pytest.raises(ValueError):
-        mod.fit(cov_type='unknown')
+        mod.fit(cov_type="unknown")
     with pytest.raises(ValueError):
         mod.fit(cov_type=3)
 
 
 def test_initial_weight_matrix(data):
     mod = IVSystemGMM(data.eqns)
-    z = [np.concatenate([data.eqns[key].exog, data.eqns[key].instruments], 1)
-         for key in data.eqns]
+    z = [
+        np.concatenate([data.eqns[key].exog, data.eqns[key].instruments], 1)
+        for key in data.eqns
+    ]
     z = np.concatenate(z, 1)
     ze = z + np.random.standard_normal(size=z.shape)
     w0 = ze.T @ ze / ze.shape[0]
@@ -225,33 +243,33 @@ def test_initial_weight_matrix(data):
 def test_summary(data):
     mod = IVSystemGMM(data.eqns)
     res = mod.fit()
-    assert 'Instruments' in res.summary.as_text()
-    assert 'Weight Estimator' in res.summary.as_text()
+    assert "Instruments" in res.summary.as_text()
+    assert "Weight Estimator" in res.summary.as_text()
     for eq in res.equations:
-        assert 'Weight Estimator' in res.equations[eq].summary.as_text()
-        assert 'Instruments' in res.equations[eq].summary.as_text()
+        assert "Weight Estimator" in res.equations[eq].summary.as_text()
+        assert "Instruments" in res.equations[eq].summary.as_text()
 
     res = mod.fit(iter_limit=10)
     if res.iterations > 2:
-        assert 'Iterative System GMM' in res.summary.as_text()
+        assert "Iterative System GMM" in res.summary.as_text()
 
 
 def test_summary_homoskedastic(data):
-    mod = IVSystemGMM(data.eqns, weight_type='unadjusted', debiased=True)
-    res = mod.fit(cov_type='homoskedastic', debiased=True)
-    assert 'Homoskedastic (Unadjusted) Weighting' in res.summary.as_text()
+    mod = IVSystemGMM(data.eqns, weight_type="unadjusted", debiased=True)
+    res = mod.fit(cov_type="homoskedastic", debiased=True)
+    assert "Homoskedastic (Unadjusted) Weighting" in res.summary.as_text()
 
 
 def test_fixed_sigma(data):
-    mod = IVSystemGMM(data.eqns, weight_type='unadjusted')
-    res = mod.fit(cov_type='unadjusted')
+    mod = IVSystemGMM(data.eqns, weight_type="unadjusted")
+    res = mod.fit(cov_type="unadjusted")
     k = len(data.eqns)
     b = np.random.standard_normal((k, 1))
     sigma = b @ b.T + np.diag(np.ones(k))
-    mod_sigma = IVSystemGMM(data.eqns, weight_type='unadjusted', sigma=sigma)
+    mod_sigma = IVSystemGMM(data.eqns, weight_type="unadjusted", sigma=sigma)
     res_sigma = mod_sigma.fit()
     assert np.any(res.params != res_sigma.params)
-    assert np.any(res.sigma != res_sigma.sigma)
+    assert np.any(np.asarray(res.sigma != res_sigma.sigma))
 
 
 def test_incorrect_sigma_shape(data):
@@ -259,7 +277,7 @@ def test_incorrect_sigma_shape(data):
     b = np.random.standard_normal((k + 2, 1))
     sigma = b @ b.T + np.diag(np.ones(k + 2))
     with pytest.raises(ValueError):
-        IVSystemGMM(data.eqns, weight_type='unadjusted', sigma=sigma)
+        IVSystemGMM(data.eqns, weight_type="unadjusted", sigma=sigma)
 
 
 def test_invalid_sigma_usage(data):
@@ -267,7 +285,7 @@ def test_invalid_sigma_usage(data):
     b = np.random.standard_normal((k, 1))
     sigma = b @ b.T + np.diag(np.ones(k))
     with pytest.warns(UserWarning):
-        IVSystemGMM(data.eqns, weight_type='robust', sigma=sigma)
+        IVSystemGMM(data.eqns, weight_type="robust", sigma=sigma)
 
 
 def test_j_statistic_direct(data):
@@ -290,22 +308,22 @@ def test_linear_constraint(data):
 
 
 def test_kernel_equiv(data):
-    mod = IVSystemGMM(data.eqns, weight_type='kernel', bandwidth=0)
-    res = mod.fit(cov_type='kernel', debiased=True, bandwidth=0)
-    assert 'Kernel (HAC) Weighting' in res.summary.as_text()
-    rob_mod = IVSystemGMM(data.eqns, weight_type='robust')
-    rob_res = rob_mod.fit(cov_type='robust', debiased=True)
+    mod = IVSystemGMM(data.eqns, weight_type="kernel", bandwidth=0)
+    res = mod.fit(cov_type="kernel", debiased=True, bandwidth=0)
+    assert "Kernel (HAC) Weighting" in res.summary.as_text()
+    rob_mod = IVSystemGMM(data.eqns, weight_type="robust")
+    rob_res = rob_mod.fit(cov_type="robust", debiased=True)
     assert_allclose(res.tstats, rob_res.tstats)
 
 
 def test_kernel_optimal_bandwidth(data):
-    mod = IVSystemGMM(data.eqns, weight_type='kernel')
-    res = mod.fit(cov_type='kernel', debiased=True)
+    mod = IVSystemGMM(data.eqns, weight_type="kernel")
+    res = mod.fit(cov_type="kernel", debiased=True)
     nobs = data.eqns[list(data.eqns.keys())[0]].dependent.shape[0]
-    assert res.weight_config['bandwidth'] == (nobs - 2)
+    assert res.weight_config["bandwidth"] == (nobs - 2)
 
-    mod = IVSystemGMM(data.eqns, weight_type='kernel', optimal_bw=True)
-    mod.fit(cov_type='kernel', debiased=True)
+    mod = IVSystemGMM(data.eqns, weight_type="kernel", optimal_bw=True)
+    mod.fit(cov_type="kernel", debiased=True)
 
 
 def test_homoskedastic_weight_direct(weight_data, center, debias):
@@ -333,7 +351,7 @@ def test_heteroskedastic_weight_direct(weight_data, center, debias):
     x, z, eps, sigma = weight_data
     weights = wm.weight_matrix(x, z, eps, sigma=sigma)
     k = len(z)
-    ze = [z[i] * eps[:, i:i + 1] for i in range(k)]
+    ze = [z[i] * eps[:, i : i + 1] for i in range(k)]
     ze = np.concatenate(ze, 1)
     if center:
         ze = ze - ze.mean(0)
@@ -350,11 +368,11 @@ def test_heteroskedastic_weight_direct(weight_data, center, debias):
 
 def test_kernel_weight_direct(weight_data, center, debias):
     bandwidth = 12
-    wm = KernelWeightMatrix(center, debias, kernel='parzen', bandwidth=bandwidth)
+    wm = KernelWeightMatrix(center, debias, kernel="parzen", bandwidth=bandwidth)
     x, z, eps, sigma = weight_data
     weights = wm.weight_matrix(x, z, eps, sigma=sigma)
     k = len(z)
-    ze = [z[i] * eps[:, i:i + 1] for i in range(k)]
+    ze = [z[i] * eps[:, i : i + 1] for i in range(k)]
     ze = np.concatenate(ze, 1)
     if center:
         ze = ze - ze.mean(0)
@@ -380,13 +398,16 @@ def test_fitted(data):
     for i, key in enumerate(res.equations):
         eq = res.equations[key]
         fv = res.fitted_values[key].copy()
-        fv.name = 'fitted_values'
+        fv.name = "fitted_values"
         assert_series_equal(eq.fitted_values, fv)
         b = eq.params.values
         direct = mod._x[i] @ b
         expected.append(direct[:, None])
         assert_allclose(eq.fitted_values, direct, atol=1e-8)
     expected = np.concatenate(expected, 1)
-    expected = DataFrame(expected, index=mod._dependent[i].pandas.index,
-                         columns=[key for key in res.equations])
+    expected = DataFrame(
+        expected,
+        index=mod._dependent[i].pandas.index,
+        columns=[key for key in res.equations],
+    )
     assert_frame_equal(expected, res.fitted_values)

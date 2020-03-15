@@ -2,11 +2,13 @@ import numpy as np
 from numpy.testing import assert_allclose
 import pytest
 
-from linearmodels.asset_pricing.covariance import (HeteroskedasticCovariance,
-                                                   HeteroskedasticWeight,
-                                                   KernelCovariance,
-                                                   KernelWeight)
-from linearmodels.utility import AttrDict
+from linearmodels.asset_pricing.covariance import (
+    HeteroskedasticCovariance,
+    HeteroskedasticWeight,
+    KernelCovariance,
+    KernelWeight,
+)
+from linearmodels.shared.utility import AttrDict
 
 
 @pytest.fixture
@@ -14,17 +16,16 @@ def data():
     moments = np.random.randn(500, 10)
     jacobian = np.random.rand(10, 8)
     jacobian_inv = np.eye(10)
-    return AttrDict(moments=moments, jacobian=jacobian,
-                    inv_jacobian=jacobian_inv)
+    return AttrDict(moments=moments, jacobian=jacobian, inv_jacobian=jacobian_inv)
 
 
 def test_kernel_errors(data):
     with pytest.raises(ValueError):
-        KernelWeight(data.moments, kernel='unknown')
+        KernelWeight(data.moments, kernel="unknown")
     with pytest.raises(ValueError):
-        KernelWeight(data.moments, bandwidth=-.5)
+        KernelWeight(data.moments, bandwidth=-0.5)
     with pytest.raises(ValueError):
-        KernelCovariance(data.moments, jacobian=data.jacobian, kernel='unknown')
+        KernelCovariance(data.moments, jacobian=data.jacobian, kernel="unknown")
     with pytest.raises(ValueError):
         KernelCovariance(data.moments, jacobian=data.jacobian, bandwidth=-4)
 
@@ -33,7 +34,9 @@ def test_no_jacobian(data):
     with pytest.raises(ValueError):
         KernelCovariance(data.moments)
     with pytest.raises(ValueError):
-        KernelCovariance(data.moments, jacobian=data.jacobian, inv_jacobian=data.inv_jacobian)
+        KernelCovariance(
+            data.moments, jacobian=data.jacobian, inv_jacobian=data.inv_jacobian
+        )
 
 
 def test_alt_jacobians(data):

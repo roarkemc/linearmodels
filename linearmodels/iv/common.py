@@ -1,10 +1,13 @@
-from numpy import ix_, ndarray, ptp, where
+from typing import Optional, Union
+
+from numpy import ix_, ptp, where
 from numpy.linalg import inv
 
-from linearmodels.utility import InvalidTestStatistic, WaldTestStatistic
+from linearmodels.shared.hypotheses import InvalidTestStatistic, WaldTestStatistic
+from linearmodels.typing import NDArray
 
 
-def find_constant(x):
+def find_constant(x: NDArray) -> Optional[int]:
     """
     Parameters
     ----------
@@ -23,8 +26,13 @@ def find_constant(x):
         return None
 
 
-def f_statistic(params: ndarray, cov: ndarray, debiased: bool, resid_df: int,
-                const_loc: int = None):
+def f_statistic(
+    params: NDArray,
+    cov: NDArray,
+    debiased: bool,
+    resid_df: int,
+    const_loc: Optional[int] = None,
+) -> Union[WaldTestStatistic, InvalidTestStatistic]:
     """
     Parameters
     ----------
@@ -42,18 +50,20 @@ def f_statistic(params: ndarray, cov: ndarray, debiased: bool, resid_df: int,
 
     Returns
     -------
-    f_stat : WaldTestStatistic
+    WaldTestStatistic
         WaldTestStatistic instance
     """
-    null = 'All parameters ex. constant are zero'
-    name = 'Model F-statistic'
+    null = "All parameters ex. constant are zero"
+    name = "Model F-statistic"
 
     nvar = params.shape[0]
     non_const = list(range(nvar))
     if const_loc is not None:
         non_const.pop(const_loc)
     if not non_const:
-        return InvalidTestStatistic('Model contains no non-constant exogenous terms', name=name)
+        return InvalidTestStatistic(
+            "Model contains no non-constant exogenous terms", name=name
+        )
     test_params = params[non_const]
     test_cov = cov[ix_(non_const, non_const)]
     test_stat = test_params.T @ inv(test_cov) @ test_params

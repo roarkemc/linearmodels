@@ -1,11 +1,41 @@
+from linearmodels.asset_pricing import (
+    LinearFactorModel,
+    LinearFactorModelGMM,
+    TradedFactorModel,
+)
 from linearmodels.iv import IV2SLS, IVGMM, IVGMMCUE, IVLIML
-from linearmodels.panel import (BetweenOLS, FamaMacBeth, FirstDifferenceOLS,
-                                PanelOLS, PooledOLS, RandomEffects)
+from linearmodels.panel import (
+    BetweenOLS,
+    FamaMacBeth,
+    FirstDifferenceOLS,
+    PanelOLS,
+    PooledOLS,
+    RandomEffects,
+)
 from linearmodels.system import IV3SLS, SUR, IVSystemGMM
 
-__all__ = ['between_ols', 'random_effects', 'first_difference_ols',
-           'pooled_ols', 'panel_ols', 'iv_2sls', 'iv_gmm', 'iv_gmm_cue',
-           'iv_liml', 'sur', 'iv_3sls', 'iv_system_gmm']
+__all__ = [
+    "traded_factor_model",
+    "linear_factor_model",
+    "linear_factor_model_gmm",
+    "between_ols",
+    "random_effects",
+    "first_difference_ols",
+    "pooled_ols",
+    "panel_ols",
+    "iv_2sls",
+    "iv_gmm",
+    "iv_gmm_cue",
+    "iv_liml",
+    "sur",
+    "iv_3sls",
+    "iv_system_gmm",
+]
+
+
+traded_factor_model = TradedFactorModel.from_formula
+linear_factor_model = LinearFactorModel.from_formula
+linear_factor_model_gmm = LinearFactorModelGMM.from_formula
 
 iv_2sls = IV2SLS.from_formula
 iv_liml = IVLIML.from_formula

@@ -1,47 +1,43 @@
 """
 A data abstraction that allow multiple input data formats
 """
-from linearmodels.compat.pandas import (concat, is_categorical,
-                                        is_categorical_dtype, is_numeric_dtype,
-                                        is_string_dtype, is_string_like)
+from linearmodels.compat.pandas import concat, is_string_like
 
 import copy
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
+from pandas.api.types import (
+    is_categorical,
+    is_categorical_dtype,
+    is_numeric_dtype,
+    is_string_dtype,
+)
 
-from linearmodels.typing.data import OptionalArrayLike
+from linearmodels.typing import AnyPandas, ArrayLike, NDArray
 
-iv_data_types = (np.ndarray, pd.DataFrame, pd.Series)
-try:
-    import xarray as xr
-
-    HAS_XARRAY = True
-    iv_data_types = iv_data_types + (xr.DataArray,)
-except ImportError:
-    HAS_XARRAY = False
-
-dim_err = '{0} has too many dims.  Maximum is 2, actual is {1}'
-type_err = 'Only ndarrays, DataArrays and Series and DataFrames are supported'
+dim_err = "{0} has too many dims.  Maximum is 2, actual is {1}"
+type_err = "Only ndarrays, DataArrays and Series and DataFrames are supported"
 
 
-def convert_columns(s, drop_first):
+def convert_columns(s: pd.Series, drop_first: bool) -> AnyPandas:
     if is_categorical(s):
         out = pd.get_dummies(s, drop_first=drop_first)
-        out.columns = [str(s.name) + '.' + str(c) for c in out]
+        out.columns = [str(s.name) + "." + str(c) for c in out]
         return out
     return s
 
 
-def expand_categoricals(x, drop_first):
+def expand_categoricals(x: AnyPandas, drop_first: bool) -> AnyPandas:
     if x.shape[1] == 0:
         return x
     return concat([convert_columns(x[c], drop_first) for c in x.columns], axis=1)
 
 
 class IVData(object):
-    """Simple class to abstract different input data formats
+    """
+    Type abstraction for use in univariate models.
 
     Parameters
     ----------
@@ -52,7 +48,7 @@ class IVData(object):
         Variable name to use when naming variables in NumPy arrays or
         xarray DataArrays
     nobs : int, optiona
-        Number of observation, used when `x` is None. If `x` is array-like,
+        Number of observation, used when `x` is None. If `x` is array_like,
         then nobs is used to check the number of observations in `x`.
     convert_dummies : bool, optional
         Flat indicating whether pandas categoricals or string input data
@@ -61,8 +57,14 @@ class IVData(object):
         Flag indicating to drop first dummy category
     """
 
-    def __init__(self, x: OptionalArrayLike, var_name: str = 'x', nobs: int = None,
-                 convert_dummies: bool = True, drop_first: bool = True):
+    def __init__(
+        self,
+        x: Optional["IVDataLike"],
+        var_name: str = "x",
+        nobs: Optional[int] = None,
+        convert_dummies: bool = True,
+        drop_first: bool = True,
+    ):
 
         if isinstance(x, IVData):
             self.__dict__.update(copy.deepcopy(x.__dict__))
@@ -70,9 +72,10 @@ class IVData(object):
         if x is None and nobs is not None:
             x = np.empty((nobs, 0))
         elif x is None:
-            raise ValueError('nobs required when x is None')
+            raise ValueError("nobs required when x is None")
 
         self.original = x
+        assert x is not None
         xndim = x.ndim
         if xndim > 2:
             raise ValueError(dim_err.format(var_name, xndim))
@@ -80,14 +83,14 @@ class IVData(object):
         if isinstance(x, np.ndarray):
             x = x.astype(dtype=np.float64)
             if xndim == 1:
-                x.shape = (x.shape[0], -1)
+                x = x.reshape((x.shape[0], -1))
 
             self._ndarray = x.astype(np.float64)
             index = list(range(x.shape[0]))
             if x.shape[1] == 1:
                 cols = [var_name]
             else:
-                cols = [var_name + '.{0}'.format(i) for i in range(x.shape[1])]
+                cols = [var_name + ".{0}".format(i) for i in range(x.shape[1])]
             self._pandas = pd.DataFrame(x, index=index, columns=cols)
             self._row_labels = index
             self._col_labels = cols
@@ -99,13 +102,15 @@ class IVData(object):
             copied = False
             columns = list(x.columns)
             if len(set(columns)) != len(columns):
-                raise ValueError('DataFrame contains duplicate column names. '
-                                 'All column names must be distinct')
+                raise ValueError(
+                    "DataFrame contains duplicate column names. "
+                    "All column names must be distinct"
+                )
             all_numeric = True
             for col in x:
                 c = x[col]
                 if is_string_dtype(c.dtype) and c.map(is_string_like).all():
-                    c = c.astype('category')
+                    c = c.astype("category")
                     if not copied:
                         x = x.copy()
                         copied = True
@@ -113,8 +118,9 @@ class IVData(object):
                 dt = c.dtype
                 all_numeric = all_numeric and is_numeric_dtype(dt)
                 if not (is_numeric_dtype(dt) or is_categorical_dtype(dt)):
-                    raise ValueError('Only numeric, string  or categorical '
-                                     'data permitted')
+                    raise ValueError(
+                        "Only numeric, string  or categorical " "data permitted"
+                    )
 
             if convert_dummies:
                 x = expand_categoricals(x, drop_first)
@@ -133,12 +139,14 @@ class IVData(object):
                 raise TypeError(type_err)
             if isinstance(x, xr.DataArray):
                 if x.ndim == 1:
-                    x = xr.concat([x], dim=var_name).transpose()
+                    x = xr.concat([x], dim=var_name)
+                    assert isinstance(x, xr.DataArray)
+                    x = x.transpose()
 
                 index = list(x.coords[x.dims[0]].values)
                 xr_cols = x.coords[x.dims[1]].values
                 if is_numeric_dtype(xr_cols.dtype):
-                    xr_cols = [var_name + '.{0}'.format(i) for i in range(x.shape[1])]
+                    xr_cols = [var_name + ".{0}".format(i) for i in range(x.shape[1])]
                 xr_cols = list(xr_cols)
                 self._ndarray = x.values.astype(np.float64)
                 self._pandas = pd.DataFrame(self._ndarray, columns=xr_cols, index=index)
@@ -149,8 +157,9 @@ class IVData(object):
 
         if nobs is not None:
             if self._ndarray.shape[0] != nobs:
-                msg = 'Array required to have {nobs} obs, has ' \
-                      '{act}'.format(nobs=nobs, act=self._ndarray.shape[0])
+                msg = "Array required to have {nobs} obs, has " "{act}".format(
+                    nobs=nobs, act=self._ndarray.shape[0]
+                )
                 raise ValueError(msg)
 
     @property
@@ -159,7 +168,7 @@ class IVData(object):
         return self._pandas
 
     @property
-    def ndarray(self) -> np.ndarray:
+    def ndarray(self) -> NDArray:
         """ndarray view of data, always 2d"""
         return self._ndarray
 
@@ -190,10 +199,13 @@ class IVData(object):
 
     @property
     def isnull(self) -> pd.Series:
-        return np.any(self._pandas.isnull(), axis=1)
+        return self._pandas.isnull().any(axis=1)
 
-    def drop(self, locs) -> None:
+    def drop(self, locs: ArrayLike) -> None:
         locs = np.asarray(locs)
         self._pandas = self.pandas.loc[~locs]
         self._ndarray = self._ndarray[~locs]
         self._row_labels = list(pd.Series(self._row_labels).loc[~locs])
+
+
+IVDataLike = Union[IVData, ArrayLike]

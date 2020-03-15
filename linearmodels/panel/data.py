@@ -1,18 +1,22 @@
-from linearmodels.compat.numpy import lstsq
-from linearmodels.compat.pandas import (concat, get_codes, is_categorical,
-                                        is_datetime64_any_dtype,
-                                        is_numeric_dtype, is_string_dtype,
-                                        is_string_like)
+from linearmodels.compat.pandas import concat, get_codes, is_string_like
 
 from itertools import product
+from typing import Dict, Hashable, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
-from pandas import (Categorical, DataFrame, Index, MultiIndex, Series,
-                    get_dummies)
+from numpy.linalg import lstsq
+from pandas import Categorical, DataFrame, Index, MultiIndex, Series, get_dummies
+from pandas.api.types import (
+    is_categorical,
+    is_datetime64_any_dtype,
+    is_numeric_dtype,
+    is_string_dtype,
+)
 
-from linearmodels.utility import ensure_unique_column, panel_to_frame
+from linearmodels.shared.utility import ensure_unique_column, panel_to_frame
+from linearmodels.typing import AnyPandas, ArrayLike, Label, NDArray
 
-__all__ = ['PanelData']
+__all__ = ["PanelData", "PanelDataLike"]
 
 
 class _Panel(object):
@@ -30,22 +34,30 @@ class _Panel(object):
     into a minimal pandas Panel-like object
     """
 
-    def __init__(self, df):
+    def __init__(self, df: DataFrame):
         self._items = df.columns
         index = df.index
+        assert isinstance(index, MultiIndex)
         self._major_axis = Index(index.levels[1][get_codes(index)[1]]).unique()
         self._minor_axis = Index(index.levels[0][get_codes(index)[0]]).unique()
-        self._full_index = MultiIndex.from_product([self._minor_axis,
-                                                    self._major_axis])
+        self._full_index = MultiIndex.from_product([self._minor_axis, self._major_axis])
         new_df = df.reindex(self._full_index)
         new_df.index.names = df.index.names
         self._frame = new_df
         i, j, k = len(self._items), len(self._major_axis), len(self.minor_axis)
         self._shape = (i, j, k)
-        self._values = np.swapaxes(np.reshape(np.asarray(new_df).copy().T, (i, k, j)), 1, 2)
+        self._values = np.swapaxes(
+            np.reshape(np.asarray(new_df).copy().T, (i, k, j)), 1, 2
+        )
 
     @classmethod
-    def from_array(cls, values, items, major_axis, minor_axis):
+    def from_array(
+        cls,
+        values: NDArray,
+        items: Sequence[Label],
+        major_axis: Sequence[Label],
+        minor_axis: Sequence[Label],
+    ) -> "_Panel":
         index = list(product(minor_axis, major_axis))
         index = MultiIndex.from_tuples(index)
         i, j, k = len(items), len(major_axis), len(minor_axis)
@@ -56,41 +68,41 @@ class _Panel(object):
         return cls(df)
 
     @property
-    def shape(self):
+    def shape(self) -> Tuple[int, int, int]:
         return self._shape
 
     @property
-    def items(self):
+    def items(self) -> Index:
         return self._items
 
     @property
-    def major_axis(self):
+    def major_axis(self) -> Index:
         return self._major_axis
 
     @property
-    def minor_axis(self):
+    def minor_axis(self) -> Index:
         return self._minor_axis
 
     @property
-    def values(self):
+    def values(self) -> NDArray:
         return self._values
 
-    def to_frame(self):
+    def to_frame(self) -> DataFrame:
         return self._frame
 
 
-def convert_columns(s, drop_first):
+def convert_columns(s: Series, drop_first: bool) -> AnyPandas:
     if is_string_dtype(s.dtype) and s.map(is_string_like).all():
-        s = s.astype('category')
+        s = s.astype("category")
 
     if is_categorical(s):
         out = get_dummies(s, drop_first=drop_first)
-        out.columns = [str(s.name) + '.' + str(c) for c in out]
+        out.columns = [str(s.name) + "." + str(c) for c in out]
         return out
     return s
 
 
-def expand_categoricals(x, drop_first):
+def expand_categoricals(x: DataFrame, drop_first: bool) -> DataFrame:
     return concat([convert_columns(x[c], drop_first) for c in x.columns], axis=1)
 
 
@@ -140,13 +152,20 @@ class PanelData(object):
         DataFrame does not have 2 levels
     """
 
-    def __init__(self, x, var_name='x', convert_dummies=True, drop_first=True, copy=True):
+    def __init__(
+        self,
+        x: "PanelDataLike",
+        var_name: str = "x",
+        convert_dummies: bool = True,
+        drop_first: bool = True,
+        copy: bool = True,
+    ):
         self._var_name = var_name
         self._convert_dummies = convert_dummies
         self._drop_first = drop_first
-        self._panel = None
-        self._shape = None
-        index_names = ['entity', 'time']
+        self._panel: Optional[_Panel] = None
+        self._shape: Optional[Tuple[int, int, int]] = None
+        index_names = ["entity", "time"]
         if isinstance(x, PanelData):
             x = x.dataframe
         self._original = x
@@ -154,15 +173,16 @@ class PanelData(object):
         if not isinstance(x, (Series, DataFrame, np.ndarray)):
             try:
                 from xarray import DataArray
+
                 if isinstance(x, DataArray):
                     if x.ndim not in (2, 3):
-                        raise ValueError('Only 2-d or 3-d DataArrays are supported')
+                        raise ValueError("Only 2-d or 3-d DataArrays are supported")
                     if x.ndim == 2:
                         x = x.to_pandas()
                     else:
-                        items = x.coords[x.dims[0]].values.tolist()
-                        major = x.coords[x.dims[1]].values.tolist()
-                        minor = x.coords[x.dims[2]].values.tolist()
+                        items: List[Hashable] = np.asarray(x.coords[x.dims[0]]).tolist()
+                        major: List[Hashable] = np.asarray(x.coords[x.dims[1]]).tolist()
+                        minor: List[Hashable] = np.asarray(x.coords[x.dims[2]]).tolist()
                         values = x.values
                         x = panel_to_frame(values, items, major, minor, True)
             except ImportError:
@@ -171,83 +191,86 @@ class PanelData(object):
         if isinstance(x, Series) and isinstance(x.index, MultiIndex):
             x = DataFrame(x)
         elif isinstance(x, Series):
-            raise ValueError('Series can only be used with a 2-level MultiIndex')
+            raise ValueError("Series can only be used with a 2-level MultiIndex")
 
         if isinstance(x, DataFrame):
-            if isinstance(x, DataFrame):
-                if isinstance(x.index, MultiIndex):
-                    if len(x.index.levels) != 2:
-                        raise ValueError('DataFrame input must have a '
-                                         'MultiIndex with 2 levels')
-                    if isinstance(self._original, (DataFrame, PanelData, Series)):
-                        for i in range(2):
-                            index_names[i] = x.index.levels[i].name or index_names[i]
-                    self._frame = x
-                    if copy:
-                        self._frame = self._frame.copy()
-                else:
-                    self._frame = DataFrame({var_name: x.T.stack(dropna=False)})
+            if isinstance(x.index, MultiIndex):
+                if len(x.index.levels) != 2:
+                    raise ValueError(
+                        "DataFrame input must have a " "MultiIndex with 2 levels"
+                    )
+                if isinstance(self._original, (DataFrame, PanelData, Series)):
+                    for i in range(2):
+                        index_names[i] = x.index.levels[i].name or index_names[i]
+                self._frame = x
+                if copy:
+                    self._frame = self._frame.copy()
             else:
-                self._frame = x.swapaxes(1, 2).to_frame(filter_observations=False)
+                self._frame = DataFrame({var_name: x.T.stack(dropna=False)})
         elif isinstance(x, np.ndarray):
             if x.ndim not in (2, 3):
-                raise ValueError('2 or 3-d array required for numpy input')
+                raise ValueError("2 or 3-d array required for numpy input")
             if x.ndim == 2:
                 x = x[None, :, :]
 
             k, t, n = x.shape
-            var_str = var_name + '.{0:0>' + str(int(np.log10(k) + .01)) + '}'
+            var_str = var_name + ".{0:0>" + str(int(np.log10(k) + 0.01)) + "}"
             variables = [var_name] if k == 1 else [var_str.format(i) for i in range(k)]
-            entity_str = 'entity.{0:0>' + str(int(np.log10(n) + .01)) + '}'
+            entity_str = "entity.{0:0>" + str(int(np.log10(n) + 0.01)) + "}"
             entities = [entity_str.format(i) for i in range(n)]
             time = list(range(t))
+            assert isinstance(x, np.ndarray)
             x = x.astype(np.float64, copy=False)
-            panel = _Panel.from_array(x, items=variables, major_axis=time,
-                                      minor_axis=entities)
+            panel = _Panel.from_array(
+                x, items=variables, major_axis=time, minor_axis=entities
+            )
             self._fake_panel = panel
             self._frame = panel.to_frame()
         else:
-            raise TypeError('Only ndarrays, DataFrames or DataArrays are '
-                            'supported')
+            raise TypeError("Only ndarrays, DataFrames or DataArrays are " "supported")
         if convert_dummies:
             self._frame = expand_categoricals(self._frame, drop_first)
             self._frame = self._frame.astype(np.float64, copy=False)
 
-        time_index = Series(self._frame.index.levels[1])
-        if not (is_numeric_dtype(time_index.dtype) or
-                is_datetime64_any_dtype(time_index.dtype)):
-            raise ValueError('The index on the time dimension must be either '
-                             'numeric or date-like')
+        time_index = Series(self.index.levels[1])
+        if not (
+            is_numeric_dtype(time_index.dtype)
+            or is_datetime64_any_dtype(time_index.dtype)
+        ):
+            raise ValueError(
+                "The index on the time dimension must be either " "numeric or date-like"
+            )
         # self._k, self._t, self._n = self.panel.shape
         self._k, self._t, self._n = self.shape
-        levels = self._frame.index.levels
-        for i in range(2):
-            levels[i].name = index_names[i]
+        self._frame.index.set_names(index_names, inplace=True)
 
     @property
-    def panel(self):
+    def panel(self) -> _Panel:
         """pandas Panel view of data"""
         if self._panel is None:
             self._panel = _Panel(self._frame)
+        assert self._panel is not None
         return self._panel
 
     @property
-    def dataframe(self):
+    def dataframe(self) -> DataFrame:
         """pandas DataFrame view of data"""
         return self._frame
 
     @property
-    def values2d(self):
+    def values2d(self) -> NDArray:
         """NumPy ndarray view of dataframe"""
         return np.asarray(self._frame)
 
     @property
-    def values3d(self):
+    def values3d(self) -> NDArray:
         """NumPy ndarray view of panel"""
         return self.panel.values
 
-    def drop(self, locs):
+    def drop(self, locs: Union[Series, NDArray]) -> None:
         """
+        Drop observations from the panel.
+
         Parameters
         ----------
         locs : ndarray
@@ -261,90 +284,93 @@ class PanelData(object):
         self._k, self._t, self._n = self.shape
 
     @property
-    def shape(self):
+    def shape(self) -> Tuple[int, int, int]:
         """Shape of panel view of data"""
         if self._shape is None:
             k = self._frame.shape[1]
-            index = self._frame.index
+            index: Index = self._frame.index
             t = index.get_level_values(1).unique().shape[0]
             n = index.get_level_values(0).unique().shape[0]
             self._shape = k, t, n
         return self._shape
 
     @property
-    def ndim(self):
+    def ndim(self) -> int:
         """Number of dimensions of panel view of data"""
         return 3
 
     @property
-    def isnull(self):
+    def isnull(self) -> Series:
         """Locations with missing observations"""
-        return np.any(self._frame.isnull(), axis=1)
+        return self._frame.isnull().any(axis=1)
 
     @property
-    def nobs(self):
+    def nobs(self) -> int:
         """Number of time observations"""
         return self._t
 
     @property
-    def nvar(self):
+    def nvar(self) -> int:
         """Number of variables"""
         return self._k
 
     @property
-    def nentity(self):
+    def nentity(self) -> int:
         """Number of entities"""
         return self._n
 
     @property
-    def vars(self):
+    def vars(self) -> List[Label]:
         """List of variable names"""
         return list(self._frame.columns)
 
     @property
-    def time(self):
+    def time(self) -> List[Label]:
         """List of time index names"""
-        index = self._frame.index
+        index = self.index
         return list(index.levels[1][get_codes(index)[1]].unique())
 
     @property
-    def entities(self):
+    def entities(self) -> List[Label]:
         """List of entity index names"""
-        index = self._frame.index
+        index = self.index
         return list(index.levels[0][get_codes(index)[0]].unique())
 
     @property
-    def entity_ids(self):
+    def entity_ids(self) -> NDArray:
         """
         Get array containing entity group membership information
 
         Returns
         -------
-        id : ndarray
+        ndarray
             2d array containing entity ids corresponding dataframe view
         """
-        return np.asarray(get_codes(self._frame.index)[0])[:, None]
+        index = self.index
+        return np.asarray(get_codes(index)[0])[:, None]
 
     @property
-    def time_ids(self):
+    def time_ids(self) -> NDArray:
         """
         Get array containing time membership information
 
         Returns
         -------
-        id : ndarray
+        ndarray
             2d array containing time ids corresponding dataframe view
         """
-        return np.asarray(get_codes(self._frame.index)[1])[:, None]
+        index = self.index
+        return np.asarray(get_codes(index)[1])[:, None]
 
-    def _demean_both_low_mem(self, weights):
-        groups = PanelData(DataFrame(np.c_[self.entity_ids, self.time_ids],
-                                     index=self._frame.index),
-                           convert_dummies=False,
-                           copy=False)
+    def _demean_both_low_mem(self, weights: Optional["PanelData"]) -> "PanelData":
+        groups = PanelData(
+            DataFrame(np.c_[self.entity_ids, self.time_ids], index=self._frame.index),
+            convert_dummies=False,
+            copy=False,
+        )
         return self.general_demean(groups, weights=weights)
 
-    def _demean_both(self, weights):
+    def _demean_both(self, weights: Optional["PanelData"]) -> "PanelData":
         """
         Entity and time demean
 
@@ -354,24 +380,25 @@ class PanelData(object):
              Weights to use in demeaning
         """
         if self.nentity > self.nobs:
-            group = 'entity'
-            dummy = 'time'
+            group = "entity"
+            dummy = "time"
         else:
-            group = 'time'
-            dummy = 'entity'
+            group = "time"
+            dummy = "entity"
         e = self.demean(group, weights=weights)
         d = self.dummies(dummy, drop_first=True)
         d.index = e.index
         d = PanelData(d).demean(group, weights=weights)
         d = d.values2d
         e = e.values2d
-        resid = e - d @ lstsq(d, e)[0]
-        resid = DataFrame(resid, index=self._frame.index,
-                          columns=self._frame.columns)
+        resid = e - d @ lstsq(d, e, rcond=None)[0]
+        resid = DataFrame(resid, index=self._frame.index, columns=self._frame.columns)
 
         return PanelData(resid)
 
-    def general_demean(self, groups, weights=None):
+    def general_demean(
+        self, groups: "PanelDataLike", weights: Optional["PanelData"] = None
+    ) -> "PanelData":
         """
         Multi-way demeaning using only groupby
 
@@ -384,7 +411,7 @@ class PanelData(object):
 
         Returns
         -------
-        demeaned : PanelData
+        PanelData
             Weighted, demeaned data according to groups
 
         Notes
@@ -394,24 +421,32 @@ class PanelData(object):
         if not isinstance(groups, PanelData):
             groups = PanelData(groups)
         if weights is None:
-            weights = PanelData(DataFrame(np.ones((self._frame.shape[0], 1)),
-                                          index=self.index,
-                                          columns=['weights']))
+            weights = PanelData(
+                DataFrame(
+                    np.ones((self._frame.shape[0], 1)),
+                    index=self.index,
+                    columns=["weights"],
+                )
+            )
         weights = weights.values2d
         groups = groups.values2d.astype(np.int64, copy=False)
 
-        weight_sum = {}
+        weight_sum: Dict[int, Series] = {}
 
-        def weighted_group_mean(df, weights, root_w, level):
-            num = (root_w * df).groupby(level=level).transform('sum')
+        def weighted_group_mean(
+            df: DataFrame, weights: DataFrame, root_w: NDArray, level: int
+        ) -> NDArray:
+            num = (root_w * df).groupby(level=level).transform("sum")
             if level in weight_sum:
                 denom = weight_sum[level]
             else:
-                denom = weights.groupby(level=level).transform('sum')
+                denom = weights.groupby(level=level).transform("sum")
                 weight_sum[level] = denom
             return np.asarray(num) / np.asarray(denom)
 
-        def demean_pass(frame, weights, root_w):
+        def demean_pass(
+            frame: DataFrame, weights: DataFrame, root_w: NDArray
+        ) -> DataFrame:
             levels = groups.shape[1]
             for level in range(levels):
                 mu = weighted_group_mean(frame, weights, root_w, level)
@@ -452,7 +487,13 @@ class PanelData(object):
 
         return PanelData(current)
 
-    def demean(self, group='entity', weights=None, return_panel=True, low_memory=False):
+    def demean(
+        self,
+        group: str = "entity",
+        weights: Optional["PanelData"] = None,
+        return_panel: bool = True,
+        low_memory: bool = False,
+    ) -> Union["PanelData", np.ndarray]:
         """
         Demeans data by either entity or time group
 
@@ -472,7 +513,7 @@ class PanelData(object):
 
         Returns
         -------
-        demeaned : PanelData
+        PanelData
             Demeaned data according to type
 
         Notes
@@ -481,17 +522,17 @@ class PanelData(object):
         the square root of the weights so that they can be used in WLS
         estimation.
         """
-        if group not in ('entity', 'time', 'both'):
+        if group not in ("entity", "time", "both"):
             raise ValueError
-        if group == 'both':
+        if group == "both":
             if not low_memory:
                 return self._demean_both(weights)
             else:
                 return self._demean_both_low_mem(weights)
 
-        level = 0 if group == 'entity' else 1
+        level = 0 if group == "entity" else 1
         if weights is None:
-            group_mu = self._frame.groupby(level=level).transform('mean')
+            group_mu = self._frame.groupby(level=level).transform("mean")
             out = self._frame - group_mu
             if not return_panel:
                 return np.asarray(out)
@@ -500,25 +541,31 @@ class PanelData(object):
             w = weights.values2d
             frame = self._frame.copy()
             frame = w * frame
-            weighted_sum = frame.groupby(level=level).transform('sum')
+            weighted_sum = frame.groupby(level=level).transform("sum")
             frame.iloc[:, :] = w
-            sum_weights = frame.groupby(level=level).transform('sum')
+            sum_weights = frame.groupby(level=level).transform("sum")
             group_mu = weighted_sum / sum_weights
             out = np.sqrt(w) * (self._frame - group_mu)
             if not return_panel:
                 return np.asarray(out)
             return PanelData(out)
 
-    def __str__(self):
-        return self.__class__.__name__ + '\n' + str(self._frame)
+    def __str__(self) -> str:
+        return self.__class__.__name__ + "\n" + str(self._frame)
 
-    def __repr__(self):
-        return self.__str__() + '\n' + self.__class__.__name__ + ' object, id: ' + hex(id(self))
+    def __repr__(self) -> str:
+        return (
+            self.__str__()
+            + "\n"
+            + self.__class__.__name__
+            + " object, id: "
+            + hex(id(self))
+        )
 
-    def _repr_html_(self):
-        return self.__class__.__name__ + '<br/>' + self._frame._repr_html_()
+    def _repr_html_(self) -> str:
+        return self.__class__.__name__ + "<br/>" + self._frame._repr_html_()
 
-    def count(self, group='entity'):
+    def count(self, group: str = "entity") -> DataFrame:
         """
         Count number of observations by entity or time
 
@@ -529,26 +576,34 @@ class PanelData(object):
 
         Returns
         -------
-        count : DataFrame
+        DataFrame
             Counts according to type. Either (entity by var) or (time by var)
         """
-        level = 0 if group == 'entity' else 1
-        reindex = self.entities if group == 'entity' else self.time
+        level = 0 if group == "entity" else 1
+        reindex = self.entities if group == "entity" else self.time
         out = self._frame.groupby(level=level).count()
 
         return out.reindex(reindex)
 
     @property
-    def index(self):
+    def index(self) -> MultiIndex:
         """Return the index of the multi-index dataframe view"""
-        return self._frame.index
+        index = self._frame.index
+        assert isinstance(index, MultiIndex)
+        return index
 
-    def copy(self):
+    def copy(self) -> "PanelData":
         """Return a deep copy"""
-        return PanelData(self._frame.copy(), var_name=self._var_name,
-                         convert_dummies=self._convert_dummies, drop_first=self._drop_first)
+        return PanelData(
+            self._frame.copy(),
+            var_name=self._var_name,
+            convert_dummies=self._convert_dummies,
+            drop_first=self._drop_first,
+        )
 
-    def mean(self, group='entity', weights=None):
+    def mean(
+        self, group: str = "entity", weights: Optional["PanelData"] = None
+    ) -> DataFrame:
         """
         Compute data mean by either entity or time group
 
@@ -561,10 +616,10 @@ class PanelData(object):
 
         Returns
         -------
-        mean : DataFrame
+        DataFrame
             Data mean according to type. Either (entity by var) or (time by var)
         """
-        level = 0 if group == 'entity' else 1
+        level = 0 if group == "entity" else 1
         if weights is None:
             mu = self._frame.groupby(level=level).mean()
         else:
@@ -576,29 +631,34 @@ class PanelData(object):
             sum_weights = frame.groupby(level=level).sum()
             mu = weighted_sum / sum_weights
 
-        reindex = self.entities if group == 'entity' else self.time
+        reindex = self.entities if group == "entity" else self.time
         out = mu.reindex(reindex)
 
         return out
 
-    def first_difference(self):
+    def first_difference(self) -> "PanelData":
         """
         Compute first differences of variables
 
         Returns
         -------
-        diffs : PanelData
+        PanelData
             Differenced values
         """
         diffs = self.panel.values
         diffs = diffs[:, 1:] - diffs[:, :-1]
-        diffs = panel_to_frame(diffs, self.panel.items, self.panel.major_axis[1:],
-                               self.panel.minor_axis, True)
-        diffs = diffs.reindex(self._frame.index).dropna(how='any')
+        diffs = panel_to_frame(
+            diffs,
+            self.panel.items,
+            self.panel.major_axis[1:],
+            self.panel.minor_axis,
+            True,
+        )
+        diffs = diffs.reindex(self._frame.index).dropna(how="any")
         return PanelData(diffs)
 
     @staticmethod
-    def _minimize_multiindex(df):
+    def _minimize_multiindex(df: DataFrame) -> DataFrame:
         index_cols = list(df.index.names)
         orig_names = index_cols[:]
         for i, col in enumerate(index_cols):
@@ -610,7 +670,7 @@ class PanelData(object):
         df.index.names = orig_names
         return df
 
-    def dummies(self, group='entity', drop_first=False):
+    def dummies(self, group: str = "entity", drop_first: bool = False) -> DataFrame:
         """
         Generate entity or time dummies
 
@@ -624,15 +684,18 @@ class PanelData(object):
 
         Returns
         -------
-        dummies : DataFrame
+        DataFrame
             Dummy variables
         """
-        if group not in ('entity', 'time'):
+        if group not in ("entity", "time"):
             raise ValueError
-        axis = 0 if group == 'entity' else 1
-        labels = get_codes(self._frame.index)
-        levels = self._frame.index.levels
+        axis = 0 if group == "entity" else 1
+        labels = get_codes(self.index)
+        levels = self.index.levels
         cat = Categorical(levels[axis][labels[axis]])
         dummies = get_dummies(cat, drop_first=drop_first)
-        cols = self.entities if group == 'entity' else self.time
+        cols = self.entities if group == "entity" else self.time
         return dummies[[c for c in cols if c in dummies]].astype(np.float64, copy=False)
+
+
+PanelDataLike = Union[PanelData, ArrayLike]

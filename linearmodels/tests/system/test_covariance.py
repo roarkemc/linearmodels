@@ -2,22 +2,26 @@ import numpy as np
 from numpy.testing import assert_allclose
 import pytest
 
-from linearmodels.iv.covariance import (kernel_weight_bartlett,
-                                        kernel_weight_parzen)
-from linearmodels.system.covariance import (GMMHeteroskedasticCovariance,
-                                            GMMHomoskedasticCovariance,
-                                            GMMKernelCovariance,
-                                            HeteroskedasticCovariance,
-                                            HomoskedasticCovariance,
-                                            KernelCovariance)
-from linearmodels.system.gmm import (HeteroskedasticWeightMatrix,
-                                     HomoskedasticWeightMatrix,
-                                     KernelWeightMatrix)
+from linearmodels.iv.covariance import kernel_weight_bartlett, kernel_weight_parzen
+from linearmodels.system.covariance import (
+    ClusteredCovariance,
+    GMMHeteroskedasticCovariance,
+    GMMHomoskedasticCovariance,
+    GMMKernelCovariance,
+    HeteroskedasticCovariance,
+    HomoskedasticCovariance,
+    KernelCovariance,
+)
+from linearmodels.system.gmm import (
+    HeteroskedasticWeightMatrix,
+    HomoskedasticWeightMatrix,
+    KernelWeightMatrix,
+)
 from linearmodels.system.model import IV3SLS
 from linearmodels.tests.system._utility import generate_3sls_data_v2
 
 covs = [HeteroskedasticCovariance, HomoskedasticCovariance]
-names = ['Heteroskedastic', 'Homoskedastic']
+names = ["Heteroskedastic", "Homoskedastic"]
 
 
 @pytest.fixture(params=list(zip(covs, names)))
@@ -50,15 +54,15 @@ def gmm_cov(request):
     return est(x, z, eps, w, sigma=sigma), name
 
 
-@pytest.fixture(scope='module')
+@pytest.fixture(scope="module")
 def cov_data():
     data = generate_3sls_data_v2(k=2)
     mod = IV3SLS(data)
-    res = mod.fit(cov_type='unadjusted')
+    res = mod.fit(cov_type="unadjusted")
     x = mod._x
     z = mod._z
-    eps = res.resids.values
-    sigma = res.sigma
+    eps = np.asarray(res.resids)
+    sigma = np.asarray(res.sigma)
     return x, z, eps, sigma
 
 
@@ -78,7 +82,7 @@ def _xpxi(x):
         for j in range(k):
             if i == j:
                 kx = x[i].shape[1]
-                xpx[loc:loc + kx, loc:loc + kx] = x[i].T @ x[i] / nobs
+                xpx[loc : loc + kx, loc : loc + kx] = x[i].T @ x[i] / nobs
                 loc += kx
     return np.linalg.inv(xpx)
 
@@ -112,7 +116,7 @@ def test_str_repr(cov):
     assert name in str(est)
     assert name in est.__repr__()
     assert str(hex(id(est))) in est.__repr__()
-    assert 'Debiased: True' in str(est)
+    assert "Debiased: True" in str(est)
 
 
 def test_gmm_str_repr(gmm_cov):
@@ -120,11 +124,11 @@ def test_gmm_str_repr(gmm_cov):
     assert name in str(est)
     assert name in est.__repr__()
     assert str(hex(id(est))) in est.__repr__()
-    assert 'GMM' in str(est)
+    assert "GMM" in str(est)
 
 
 def test_homoskedastic_direct(cov_data, debias):
-    x, z, eps, sigma = cov_data
+    x, _, eps, sigma = cov_data
     cov = HomoskedasticCovariance(x, eps, sigma, sigma, debiased=debias)
     k = len(x)
     nobs = x[0].shape[0]
@@ -151,10 +155,10 @@ def test_homoskedastic_direct(cov_data, debias):
 
 
 def test_heteroskedastic_direct(cov_data, debias):
-    x, z, eps, sigma = cov_data
+    x, _, eps, sigma = cov_data
     cov = HeteroskedasticCovariance(x, eps, sigma, sigma, debiased=debias)
     k = len(x)
-    xe = [x[i] * eps[:, i:i + 1] for i in range(k)]
+    xe = [x[i] * eps[:, i : i + 1] for i in range(k)]
     xe = np.concatenate(xe, 1)
     nobs = xe.shape[0]
     xeex = np.zeros((xe.shape[1], xe.shape[1]))
@@ -177,13 +181,21 @@ def test_heteroskedastic_direct(cov_data, debias):
 
 
 def test_kernel_direct(cov_data, debias):
-    x, z, eps, sigma = cov_data
+    x, _, eps, sigma = cov_data
     k = len(x)
     bandwidth = 12
-    cov = KernelCovariance(x, eps, sigma, sigma, gls=False, debiased=debias,
-                           kernel='parzen', bandwidth=bandwidth)
+    cov = KernelCovariance(
+        x,
+        eps,
+        sigma,
+        sigma,
+        gls=False,
+        debiased=debias,
+        kernel="parzen",
+        bandwidth=bandwidth,
+    )
     assert cov.bandwidth == 12
-    xe = [x[i] * eps[:, i:i + 1] for i in range(k)]
+    xe = [x[i] * eps[:, i : i + 1] for i in range(k)]
     xe = np.concatenate(xe, 1)
     w = kernel_weight_parzen(12)
     nobs = xe.shape[0]
@@ -207,6 +219,73 @@ def test_kernel_direct(cov_data, debias):
     s = np.sqrt(np.diag(cov.cov))[:, None]
     c_direct = direct / (s @ s.T)
     assert_allclose(r_direct, c_direct, atol=1e-5)
+
+
+def test_clustered_direct(cov_data, debias):
+    x, _, eps, sigma = cov_data
+    clustered = ClusteredCovariance(
+        x,
+        eps,
+        sigma,
+        sigma,
+        gls=False,
+        debiased=debias,
+        clusters=np.arange(eps.shape[0]),
+    )
+    hetero = HeteroskedasticCovariance(
+        x, eps, sigma, sigma, gls=False, debiased=debias,
+    )
+    assert_allclose(clustered.cov, hetero.cov)
+
+
+CLUSTERS = [
+    None,
+    np.arange(500) % 41,
+    np.column_stack([np.arange(500) % 37]),
+    np.column_stack([np.arange(500) % 37, np.arange(500) % 41]),
+]
+
+
+@pytest.mark.parametrize("group_debias", [True, False])
+@pytest.mark.parametrize("clusters", CLUSTERS)
+def test_clustered_smoke(cov_data, debias, clusters, group_debias):
+    x, _, eps, sigma = cov_data
+    clustered = ClusteredCovariance(
+        x,
+        eps,
+        sigma,
+        sigma,
+        gls=False,
+        debiased=debias,
+        clusters=clusters,
+        group_debias=group_debias,
+    )
+    assert isinstance(clustered.cov, np.ndarray)
+    assert "clusters" in clustered.cov_config
+    assert "group_debias" in clustered.cov_config
+    assert clustered.cov_config["group_debias"] is group_debias
+
+
+def test_clustered_error(cov_data, debias):
+    x, _, eps, sigma = cov_data
+    nobs = eps.shape[0]
+    clusters = np.zeros((nobs, 2))
+    clusters[:, 0] = np.arange(nobs) % 20
+    clusters[:, 1] = np.arange(nobs) % 40
+    with pytest.raises(ValueError, match="clusters must be non-nested"):
+        ClusteredCovariance(
+            x, eps, sigma, sigma, gls=False, debiased=debias, clusters=clusters,
+        )
+    clusters = np.ones((nobs, 3))
+    with pytest.raises(ValueError, match="clusters must be an ndarray"):
+        ClusteredCovariance(
+            x, eps, sigma, sigma, gls=False, debiased=debias, clusters=clusters,
+        )
+    clusters = np.ones((nobs, 2, 2))
+    with pytest.raises(ValueError, match="clusters must be an ndarray"):
+        ClusteredCovariance(
+            x, eps, sigma, sigma, gls=False, debiased=debias, clusters=clusters,
+        )
 
 
 def test_gmm_homoskedastic_direct(cov_data, debias):
@@ -257,7 +336,7 @@ def test_gmm_heterosedastic_direct(cov_data, debias):
     xpz = _xpz(x, z)
     wi = np.linalg.inv(w)
     xpz_wi = xpz @ wi
-    ze = [z[i] * eps[:, i:i + 1] for i in range(k)]
+    ze = [z[i] * eps[:, i : i + 1] for i in range(k)]
     ze = np.concatenate(ze, 1)
     zeez = ze.T @ ze / nobs
     assert_allclose(zeez, cov_est._omega())
@@ -279,16 +358,24 @@ def test_gmm_kernel_direct(cov_data):
     bandwidth = 12
     k = len(x)
     nobs = x[0].shape[0]
-    wm = KernelWeightMatrix(kernel='bartlett', bandwidth=bandwidth)
+    wm = KernelWeightMatrix(kernel="bartlett", bandwidth=bandwidth)
     w = wm.weight_matrix(x, z, eps, sigma=sigma)
-    cov_est = GMMKernelCovariance(x, z, eps, w, sigma=sigma, debiased=debias, kernel='bartlett',
-                                  bandwidth=bandwidth)
+    cov_est = GMMKernelCovariance(
+        x,
+        z,
+        eps,
+        w,
+        sigma=sigma,
+        debiased=debias,
+        kernel="bartlett",
+        bandwidth=bandwidth,
+    )
 
     xpz_wi_zpxi = _xpz_wi_zpxi(x, z, w)
     xpz = _xpz(x, z)
     wi = np.linalg.inv(w)
     xpz_wi = xpz @ wi
-    ze = [z[i] * eps[:, i:i + 1] for i in range(k)]
+    ze = [z[i] * eps[:, i : i + 1] for i in range(k)]
     ze = np.concatenate(ze, 1)
     zeez = ze.T @ ze / nobs
     w = kernel_weight_bartlett(bandwidth)
@@ -307,3 +394,4 @@ def test_gmm_kernel_direct(cov_data):
         direct *= adj
     direct = (direct + direct.T) / 2
     assert_allclose(direct, cov_est.cov)
+    assert "kernel" in cov_est.cov_config

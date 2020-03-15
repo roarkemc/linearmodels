@@ -1,19 +1,21 @@
-from linearmodels.compat.numpy import lstsq
-
 import numpy as np
+from numpy.linalg import lstsq
 from numpy.testing import assert_allclose
 import pandas as pd
 import pytest
 
-from linearmodels.system._utility import (LinearConstraint,
-                                          blocked_column_product,
-                                          blocked_cross_prod,
-                                          blocked_diag_product,
-                                          blocked_full_inner_product,
-                                          blocked_inner_prod, inv_matrix_sqrt)
+from linearmodels.system._utility import (
+    LinearConstraint,
+    blocked_column_product,
+    blocked_cross_prod,
+    blocked_diag_product,
+    blocked_full_inner_product,
+    blocked_inner_prod,
+    inv_matrix_sqrt,
+)
 
 
-@pytest.fixture(params=(3, np.arange(1, 6)), ids=['common-size', 'different-size'])
+@pytest.fixture(params=(3, np.arange(1, 6)), ids=["common-size", "different-size"])
 def data(request):
     k = 5
     t = 200
@@ -118,9 +120,9 @@ def test_linear_constraint():
     x = np.random.randn(200, 5)
     y = np.random.randn(200, 1)
     xt = x @ lc.t
-    bc = lstsq(xt, y)[0]
+    bc = lstsq(xt, y, rcond=None)[0]
     ec = y - xt @ bc
-    b = lstsq(x[:, 2:], y)[0]
+    b = lstsq(x[:, 2:], y, rcond=None)[0]
     e = y - x[:, 2:] @ b
     assert_allclose(ec.T @ ec, e.T @ e)
 
@@ -151,12 +153,12 @@ def test_linear_constraint_repr():
     r = np.eye(10)
     lc = LinearConstraint(r, require_pandas=False)
     assert hex(id(lc)) in lc.__repr__()
-    assert '10 constraints' in lc.__repr__()
+    assert "10 constraints" in lc.__repr__()
     assert isinstance(lc.q, pd.Series)
     assert np.all(lc.q == 0)
     assert lc.q.shape == (10,)
     assert isinstance(lc.r, pd.DataFrame)
-    assert np.all(lc.r.values == np.eye(10))
+    assert np.all(np.asarray(lc.r) == np.eye(10))
 
 
 def test_blocked_full_inner_product():
@@ -197,5 +199,6 @@ def test_blocked_outer_product():
     _z = np.concatenate(_z, 0)
     desired = _x.T @ np.kron(s, np.eye(nobs)) @ _z
     assert_allclose(actual, desired)
+
 
 # TODO: One complex constrain test of equivalence

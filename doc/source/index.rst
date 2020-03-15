@@ -1,5 +1,7 @@
-Linear Model Estimation
-=======================
+.. image:: images/logo-text.svg
+   :width: 50%
+   :align: left
+   :alt: linearmodels logo
 
 .. note::
 
@@ -8,7 +10,8 @@ Linear Model Estimation
   Documentation for `recent developments <https://bashtage.github.io/linearmodels/devel/>`_
   is located at `devel <https://bashtage.github.io/linearmodels/devel/>`_.
 
-Estimation and inference in some common linear models:
+Estimation and inference in some common linear models that are missing
+from `statsmodels <https://statsmodels.org>`_:
 
 **Panel Data Models**
 
@@ -18,6 +21,11 @@ Estimation and inference in some common linear models:
 * Between Estimation (:class:`~linearmodels.panel.model.BetweenOLS`)
 * Pooled OLS (:class:`~linearmodels.panel.model.PooledOLS`)
 * Fama-MacBeth Estimation (:class:`~linearmodels.panel.model.FamaMacBeth`)
+
+
+**High-dimensional Regression**
+
+* Absorbing Least Squares (:class:`~linearmodels.iv.absorbing.AbsorbingLS`)
 
 
 **Single equation Instrumental Variables (IV) models**
@@ -44,10 +52,11 @@ Estimation and inference in some common linear models:
 * Linear factor model (1-step SUR, only for traded factors)
   (:class:`~linearmodels.asset_pricing.model.TradedFactorModel`)
 
+linearmodels
+============
 
 .. toctree::
    :maxdepth: 1
-   :caption: Contents:
    :glob:
 
    iv/index
@@ -61,9 +70,8 @@ Estimation and inference in some common linear models:
    references
 
 
-Indices and tables
-==================
+Indices
+=======
 
 * :ref:`genindex`
 * :ref:`modindex`
-* :ref:`search`

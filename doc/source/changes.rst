@@ -1,6 +1,41 @@
 Change Log
 ----------
 
+
+Since 4.17
+==========
+* Added a clustered covariance estimator
+  (:class:`linearmodels.system.covariance.ClusteredCovariance`) for system regressions
+  (:issue:`241`).
+* Fixed a bug in :class:`~linearmodels.iv.covariance.kernel_optimal_bandwidth`
+  which used incorrect values for a tuning parameter in the bandwidth estimation
+  for the Parzen and Quadratic Spectral kernels (:issue:`242`).
+
+Version 4.17
+============
+* Fixed various typing issues (:issue:`239`, :issue:`240`).
+
+Version 4.16
+============
+* Verify typing using mypy (:issue:`232`, :issue:`234`, :issue:`235`, :issue:`238`).
+* Added typing to all public-facing classes and methods (:issue:`228`, :issue:`229`).
+* Added :class:`~linearmodels.panel.results.FamaMacBethResults` which has
+  the property :meth:`~linearmodels.panel.results.FamaMacBethResults.all_params`
+  that contains a (nobs, nparam) DataFrame of parameters estimated in each time
+  period (:issue:`230`).
+
+Version 4.15
+============
+* Blackened the code.
+* Added McElroy's and Berndt's measures of system fit (:issue:`215`).
+* Removed support for Python 3.5 inline with NEP-29 (:issue:`222`).
+
+Version 4.14
+============
+* Fixed issue where datasets were not installed with wheels (:issue:`217`).
+* Switched to property-cached to inherit cached property from property (:issue:`211`).
+* Removed all use of :class:`pandas.Panel` (:issue:`211`).
+
 Version 4.13
 ============
 * Added :class:`~linearmodels.iv.absorbing.AbsorbingLS` which allows a large number

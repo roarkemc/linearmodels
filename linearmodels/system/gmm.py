@@ -1,12 +1,15 @@
 """
 Covariance and weight estimation for GMM IV estimators
 """
-from numpy import array, empty, repeat, sqrt
+from typing import Optional, Sequence
+
+from numpy import array, empty, ndarray, repeat, sqrt
 
 from linearmodels.asset_pricing.covariance import _HACMixin
 from linearmodels.iv.covariance import kernel_optimal_bandwidth
+from linearmodels.shared.utility import AttrDict
 from linearmodels.system._utility import blocked_inner_prod
-from linearmodels.utility import AttrDict
+from linearmodels.typing import NDArray
 
 
 class HomoskedasticWeightMatrix(object):
@@ -36,30 +39,45 @@ class HomoskedasticWeightMatrix(object):
     ``center`` has no effect on this estimator since it is always centered.
     """
 
-    def __init__(self, center=False, debiased=False):
+    def __init__(self, center: bool = False, debiased: bool = False) -> None:
         self._center = center
         self._debiased = debiased
-        self._bandwidth = 0
-        self._name = 'Homoskedastic (Unadjusted) Weighting'
+        self._bandwidth: Optional[float] = 0
+        self._name = "Homoskedastic (Unadjusted) Weighting"
         self._config = AttrDict(center=center, debiased=debiased)
 
-    def __str__(self):
+    def __str__(self) -> str:
         out = self._name
         extra = []
         for key in self._str_extra:
-            extra.append(': '.join([key, str(self._str_extra[key])]))
+            extra.append(": ".join([str(key), str(self._str_extra[key])]))
         if extra:
-            out += ' (' + ', '.join(extra) + ')'
+            out += " (" + ", ".join(extra) + ")"
         return out
 
-    def __repr__(self):
-        return self.__str__() + ', id: {0}'.format(hex(id(self)))
+    def __repr__(self) -> str:
+        return self.__str__() + ", id: {0}".format(hex(id(self)))
 
     @property
-    def _str_extra(self):
+    def _str_extra(self) -> AttrDict:
         return AttrDict(Debiased=self._debiased, Center=self._center)
 
-    def sigma(self, eps, x):
+    def sigma(self, eps: NDArray, x: Sequence[NDArray]) -> NDArray:
+        """
+        Estimate residual covariance.
+
+        Parameters
+        ----------
+        eps : ndarray
+            The residuals from the system of equations.
+        x : list[ndarray]
+            A list of the regressor matrices for each equation in the system.
+
+        Returns
+        -------
+        ndarray
+            The estimated covariance matrix of the residuals.
+        """
         nobs = eps.shape[0]
         eps = eps - eps.mean(0)
         sigma = eps.T @ eps / nobs
@@ -72,22 +90,31 @@ class HomoskedasticWeightMatrix(object):
 
         return sigma
 
-    def weight_matrix(self, x, z, eps, *, sigma=None):
+    def weight_matrix(
+        self,
+        x: Sequence[NDArray],
+        z: Sequence[NDArray],
+        eps: NDArray,
+        *,
+        sigma: Optional[ndarray] = None,
+    ) -> NDArray:
         """
+        Construct a GMM weight matrix for a model.
+
         Parameters
         ----------
-        x : ndarray
+        x : list[ndarray]
             List of containing model regressors for each equation in the system
-        z : ndarray
+        z : list[ndarray]
             List of containing instruments for each equation in the system
         eps : ndarray
             Model errors (nobs by neqn)
-        sigma : ndarray
-            Fixed covariance of model errors
+        sigma : ndarray, default None
+            Fixed covariance of model errors. If None, estimated from eps.
 
         Returns
         -------
-        weight : ndarray
+        ndarray
             Covariance of GMM moment conditions.
         """
         nobs = z[0].shape[0]
@@ -95,13 +122,13 @@ class HomoskedasticWeightMatrix(object):
         return w
 
     @property
-    def config(self):
+    def config(self) -> AttrDict:
         """
         Weight estimator configuration
 
         Returns
         -------
-        config : AttrDict
+        AttrDict
             Dictionary containing weight estimator configuration information
         """
         return self._config
@@ -135,24 +162,35 @@ class HeteroskedasticWeightMatrix(HomoskedasticWeightMatrix):
     dependence between the moment conditions.
     """
 
-    def __init__(self, center=False, debiased=False):
+    def __init__(self, center: bool = False, debiased: bool = False) -> None:
         super(HeteroskedasticWeightMatrix, self).__init__(center, debiased)
-        self._name = 'Heteroskedastic (Robust) Weighting'
+        self._name = "Heteroskedastic (Robust) Weighting"
 
-    def weight_matrix(self, x, z, eps, *, sigma=None):
+    def weight_matrix(
+        self,
+        x: Sequence[NDArray],
+        z: Sequence[NDArray],
+        eps: NDArray,
+        *,
+        sigma: Optional[ndarray] = None,
+    ) -> NDArray:
         """
+        Construct a GMM weight matrix for a model.
+
         Parameters
         ----------
-        x : ndarray
+        x : list[ndarray]
             Model regressors (exog and endog), (nobs by nvar)
-        z : ndarray
+        z : list[ndarray]
             Model instruments (exog and instruments), (nobs by ninstr)
         eps : ndarray
             Model errors (nobs by 1)
+        sigma : ndarray, default None
+            Fixed covariance of model errors. If None, estimated from eps.
 
         Returns
         -------
-        weight : ndarray
+        ndarray
             Covariance of GMM moment conditions.
         """
         nobs = x[0].shape[0]
@@ -163,7 +201,7 @@ class HeteroskedasticWeightMatrix(HomoskedasticWeightMatrix):
         for i in range(k):
             e = eps[:, [i]]
             zk = z[i].shape[1]
-            ze[:, loc:loc + zk] = z[i] * e
+            ze[:, loc : loc + zk] = z[i] * e
             loc += zk
         mu = ze.mean(axis=0) if self._center else 0
         ze -= mu
@@ -173,7 +211,9 @@ class HeteroskedasticWeightMatrix(HomoskedasticWeightMatrix):
 
         return w
 
-    def _debias_scale(self, nobs, x, z):
+    def _debias_scale(
+        self, nobs: int, x: Sequence[NDArray], z: Sequence[NDArray]
+    ) -> float:
         if not self._debiased:
             return 1
         nvar = array(list(map(lambda a: a.shape[1], x)))
@@ -228,29 +268,47 @@ class KernelWeightMatrix(HeteroskedasticWeightMatrix, _HACMixin):
     between the moment conditions.
     """
 
-    def __init__(self, center=False, debiased=False, kernel='bartlett', bandwidth=None,
-                 optimal_bw=False):
+    def __init__(
+        self,
+        center: bool = False,
+        debiased: bool = False,
+        kernel: str = "bartlett",
+        bandwidth: Optional[float] = None,
+        optimal_bw: bool = False,
+    ) -> None:
+        _HACMixin.__init__(self, kernel, bandwidth)
         super(KernelWeightMatrix, self).__init__(center, debiased)
-        self._name = 'Kernel (HAC) Weighting'
+        self._name = "Kernel (HAC) Weighting"
         self._check_kernel(kernel)
         self._check_bandwidth(bandwidth)
         self._predefined_bw = self._bandwidth
         self._optimal_bw = optimal_bw
 
-    def weight_matrix(self, x, z, eps, *, sigma=None):
+    def weight_matrix(
+        self,
+        x: Sequence[NDArray],
+        z: Sequence[NDArray],
+        eps: NDArray,
+        *,
+        sigma: Optional[ndarray] = None,
+    ) -> NDArray:
         """
+        Construct a GMM weight matrix for a model.
+
         Parameters
         ----------
-        x : ndarray
-            Model regressors (exog and endog), (nobs by nvar)
-        z : ndarray
-            Model instruments (exog and instruments), (nobs by ninstr)
+        x : List[ndarray]
+            Model regressors (exog and endog)
+        z : List[ndarray]
+            Model instruments (exog and instruments)
         eps : ndarray
-            Model errors (nobs by 1)
+            Model errors (nobs by nequation)
+        sigma : ndarray, default None
+            Fixed covariance of model errors. If None, estimated from eps.
 
         Returns
         -------
-        weight : ndarray
+        ndarray
             Covariance of GMM moment conditions.
         """
         nobs = x[0].shape[0]
@@ -261,7 +319,7 @@ class KernelWeightMatrix(HeteroskedasticWeightMatrix, _HACMixin):
         for i in range(k):
             e = eps[:, [i]]
             zk = z[i].shape[1]
-            ze[:, loc:loc + zk] = z[i] * e
+            ze[:, loc : loc + zk] = z[i] * e
             loc += zk
         mu = ze.mean(axis=0) if self._center else 0
         ze -= mu
@@ -272,7 +330,7 @@ class KernelWeightMatrix(HeteroskedasticWeightMatrix, _HACMixin):
 
         return w
 
-    def _optimal_bandwidth(self, moments):
+    def _optimal_bandwidth(self, moments: NDArray) -> float:
         """Compute optimal bandwidth used in estimation if needed"""
         if self._predefined_bw is not None:
             return self._predefined_bw
@@ -282,23 +340,25 @@ class KernelWeightMatrix(HeteroskedasticWeightMatrix, _HACMixin):
             m = moments / moments.std(0)[None, :]
             m = m.sum(1)
             self._bandwidth = kernel_optimal_bandwidth(m, kernel=self.kernel)
+        assert self._bandwidth is not None
         return self._bandwidth
 
     @property
-    def bandwidth(self):
+    def bandwidth(self) -> float:
         """Bandwidth used to estimate covariance of moment conditions"""
+        assert self._bandwidth is not None
         return self._bandwidth
 
     @property
-    def config(self):
+    def config(self) -> AttrDict:
         """
         Weight estimator configuration
 
         Returns
         -------
-        config : AttrDict
+        AttrDict
             Dictionary containing weight estimator configuration information
         """
         out = AttrDict([(k, v) for k, v in self._config.items()])
-        out['bandwidth'] = self.bandwidth
+        out["bandwidth"] = self.bandwidth
         return out
